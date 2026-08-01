@@ -1,0 +1,54 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "confirm": {
+        "title": "Add Tensite battery cluster",
+        "description": "Connect through {name} at {address}?\n\nEvery battery in a bank advertises separately, so all of them appear here. Connecting through the bank master covers the whole cluster; connecting through another battery is also fine, and is useful for debugging a single unit.\n\nHome Assistant will now connect and check what this battery reports. That can take up to half a minute."
+      },
+      "user": {
+        "title": "Add Tensite battery cluster",
+        "description": "Choose the battery to connect through. The bank master relays data for every battery in its cluster; other batteries can also be used, which is useful when debugging one unit.",
+        "data": {
+          "address": "Bluetooth device"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect. The gateway accepts only one Bluetooth connection at a time, so check nothing else is talking to it — another script, an add-on, or the Tensite app.",
+      "no_batteries": "Connected, but this battery reported no data. It may not be relaying for its cluster. Try the bank master instead."
+    },
+    "abort": {
+      "already_configured": "This battery is already set up",
+      "no_devices_found": "No Tensite batteries found. Check they are powered and in range, and that nothing else is holding the gateway's Bluetooth connection.",
+      "not_connectable": "This battery was only seen by a non-connectable Bluetooth adapter or proxy. An active connection is required to read cell data."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tensite BMS options",
+        "data": {
+          "scan_interval": "Polling interval (seconds)",
+          "expected_batteries": "Batteries in this cluster"
+        },
+        "data_description": {
+          "scan_interval": "The gateway accepts only one Bluetooth connection at a time, and each poll holds it for several seconds. Cell voltages drift slowly, so polling often gains little.",
+          "expected_batteries": "How many batteries are in this cluster. Set it and each poll ends as soon as they have all reported, which is much quicker. Left at 0, every poll waits out the full listening window — slower, but it cannot miss a battery that reports late."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_count": { "name": "Batteries" },
+      "stack_voltage": { "name": "Stack voltage" },
+      "min_cell_voltage": { "name": "Minimum cell voltage" },
+      "max_cell_voltage": { "name": "Maximum cell voltage" },
+      "cell_delta": { "name": "Cell imbalance" },
+      "cell_count": { "name": "Cells" },
+      "cell_voltage": { "name": "Voltage" },
+      "rssi": { "name": "Signal strength" }
+    }
+  }
+}

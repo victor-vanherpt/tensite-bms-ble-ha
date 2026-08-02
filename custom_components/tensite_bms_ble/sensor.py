@@ -156,6 +156,26 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
     # advertisement arrives. So report what was actually achieved alongside
     # what was asked for, which is the only way to tell "set to 60 s but the
     # gateway only advertises every 300" from "polling is broken".
+    # Detected, not configured: what the last full-window poll counted. See
+    # FULL_SCAN_INTERVAL for why only those polls may set it.
+    ClusterSensorDescription(
+        key="batteries_expected",
+        translation_key="batteries_expected",
+        value_fn=lambda r: None,
+        coordinator_fn=lambda c: c.batteries_expected,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    # Below expected on any single poll is normal -- the gateway answers its
+    # batteries in rotation. Below expected every poll is not.
+    ClusterSensorDescription(
+        key="batteries_reported",
+        translation_key="batteries_reported",
+        value_fn=lambda r: None,
+        coordinator_fn=lambda c: c.batteries_reported,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
     ClusterSensorDescription(
         key="poll_interval",
         translation_key="poll_interval",

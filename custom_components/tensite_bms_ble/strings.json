@@ -12,13 +12,6 @@
         "data": {
           "address": "Bluetooth device"
         }
-      },
-      "battery_count": {
-        "title": "Batteries in this cluster",
-        "description": "The probe heard back from {found} battery/batteries ({serials}).\n\nNothing in the protocol reports the bank size, and the gateway answers its batteries in rotation, so a single probe can undercount. Confirm the real number: each poll then ends as soon as they have all reported, instead of always waiting out the listening window.",
-        "data": {
-          "expected_batteries": "Number of batteries"
-        }
       }
     },
     "error": {
@@ -37,12 +30,12 @@
         "title": "Tensite BMS options",
         "data": {
           "scan_interval": "Delay between polls (seconds)",
-          "expected_batteries": "Batteries in this cluster",
+          "expected_batteries": "Force battery count",
           "hide_sentinel_temperatures": "Hide non-reporting temperature sensors"
         },
         "data_description": {
-          "scan_interval": "How long to wait after one poll finishes before starting the next. It is a delay, not a fixed period: a poll itself takes 4-7 seconds, so a 60 second delay produces a reading roughly every 66 seconds. The battery gateway accepts only one Bluetooth connection at a time, so a short delay will keep the Tensite app from connecting. Below about a minute you are mostly sampling noise, since cell voltages drift by a few millivolts over minutes -- short delays are for watching something happen, not for logging. A new poll never starts while one is still running.",
-          "expected_batteries": "How many batteries are in this cluster. Set it and each poll ends as soon as they have all reported, which is much quicker. Left at 0, every poll waits out the full listening window — slower, but it cannot miss a battery that reports late.",
+          "scan_interval": "How long to wait after one poll before another may start. It is a floor, not a schedule: polls are triggered by the gateway's Bluetooth advertisements, and this hardware advertises roughly every 4-5 minutes, so that is the real ceiling on how often readings arrive. Setting anything below it simply means \"poll on every advertisement\". Check the Time between polls sensor for what is actually happening.",
+          "expected_batteries": "Leave at 0 to detect the bank size automatically, which is re-checked every hour by a poll that waits out the full listening window. Set a number only to override that, for instance if a battery is offline for a while and you do not want every poll waiting for it.",
           "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 °C or -30 °C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected — a genuinely cold pack below freezing is still reported normally."
         }
       }
@@ -138,6 +131,12 @@
       },
       "consecutive_failures": {
         "name": "Consecutive poll failures"
+      },
+      "batteries_expected": {
+        "name": "Batteries expected"
+      },
+      "batteries_reported": {
+        "name": "Batteries reported"
       }
     },
     "binary_sensor": {

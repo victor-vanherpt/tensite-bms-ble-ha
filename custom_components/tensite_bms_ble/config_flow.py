@@ -77,7 +77,6 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
         self._serial: str | None = None
         self._members: list[str] = []
         self._master_serial: str | None = None
-        self._expected: int = 0
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -106,7 +105,7 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             error = await self._async_probe()
             if error is None:
-                return await self.async_step_battery_count()
+                return self._create_entry()
             errors["base"] = error
 
         self._set_confirm_only()
@@ -116,37 +115,6 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "name": _title(self._serial, self._address),
                 "address": self._address,
-            },
-        )
-
-    async def async_step_battery_count(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Confirm how many batteries this cluster contains.
-
-        Nothing in the protocol states the bank size -- it can only be inferred
-        from how many batteries happen to answer, and the gateway round-robins
-        them, so a single poll can easily undercount. Pinning it here lets each
-        poll stop as soon as they have all reported instead of always waiting
-        out the listening window, and stops an undercount becoming permanent.
-        """
-        found = len(self._members)
-        if user_input is not None:
-            self._expected = user_input[CONF_EXPECTED_BATTERIES]
-            return self._create_entry()
-
-        return self.async_show_form(
-            step_id="battery_count",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_EXPECTED_BATTERIES, default=found or 1
-                    ): vol.All(cv.positive_int, vol.Range(min=1, max=32))
-                }
-            ),
-            description_placeholders={
-                "found": str(found),
-                "serials": ", ".join(s[-5:] for s in self._members) or "none",
             },
         )
 
@@ -213,7 +181,7 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
             error = await self._async_probe()
             if error is None:
-                return await self.async_step_battery_count()
+                return self._create_entry()
             errors["base"] = error
 
         current = self._async_current_ids()
@@ -254,7 +222,10 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_SERIAL: self._serial,
                 CONF_MEMBER_SERIALS: self._members,
             },
-            options={CONF_EXPECTED_BATTERIES: self._expected},
+            # 0 = detect the bank size automatically; the coordinator
+            # re-establishes it hourly with a full-window poll. The option
+            # exists to override that, not to be answered up front.
+            options={CONF_EXPECTED_BATTERIES: DEFAULT_EXPECTED_BATTERIES},
         )
 
     @staticmethod

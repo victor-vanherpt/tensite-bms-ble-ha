@@ -5,31 +5,30 @@ the ESP32 gateway accepts a single BLE central at a time, and connecting to the
 cluster master relays frames for every battery in the bank. A coordinator per
 battery would have them competing for the one connection slot.
 
-**Timer-driven, not advertisement-driven.** The natural choice here is
-``ActiveBluetoothDataUpdateCoordinator``, which polls when an advertisement
-arrives, and that is what this used to be. The problem is that this gateway
-only reaches Home Assistant's callbacks every 245-300 seconds -- measured, not
-assumed -- and a poll can only start when one does. That capped polling at
-roughly five minutes however the interval was configured, so any shorter
-setting silently did nothing.
+**Advertisement-driven, and it has to be.** Polling on a timer was tried, to
+escape the fact that this gateway only reaches Home Assistant's callbacks every
+245-300 seconds and a poll can therefore only start that often. It works for
+exactly three polls. From the fourth onward every connection fails with "the
+proxy/adapter is out of connection slots" while the adapter is idle, BlueZ
+reports no connected devices, and the device is advertising a second earlier --
+and it never recovers until Home Assistant restarts. Something in the path
+leaks a connection slot per poll when the poll is not driven by an
+advertisement. Reaping stale connections first, resolving the device from the
+last advertisement rather than by address, and keeping the Bluetooth callback
+registered were all tried; none of them helped.
 
-Polls therefore run on a timer, resolving the device through
-``async_ble_device_from_address``, which reads Home Assistant's own cache and
-needs no fresh advertisement. The cost is that we now connect without an
-advertisement first proving the device is reachable, so failed polls become a
-normal outcome rather than a surprise. That is what the poll diagnostics on
-this class are for.
+Driven from advertisements it is completely stable -- tens of consecutive polls
+with no failures. So the poll delay is a *floor*, and the real ceiling is the
+gateway's advertising cadence: setting anything below roughly 280 seconds means
+"poll on every advertisement", which is as fast as this hardware allows.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from datetime import timedelta
 
 from bluetooth_data_tools import monotonic_time_coarse
 from homeassistant.components.bluetooth import (
-    BluetoothChange,
     BluetoothScanningMode,
     BluetoothServiceInfoBleak,
     async_ble_device_from_address,
@@ -38,7 +37,9 @@ from homeassistant.components.bluetooth import (
 )
 from homeassistant.components.bluetooth.match import BluetoothCallbackMatcher
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.components.bluetooth.active_update_coordinator import (
+    ActiveBluetoothDataUpdateCoordinator,
+)
 from tensite_bms_ble import (
     ClusterReading,
     TensiteClusterClient,
@@ -49,7 +50,9 @@ from tensite_bms_ble import (
 
 from .const import (
     CONNECT_TIMEOUT,
+    FULL_SCAN_INTERVAL,
     LISTEN_TIMEOUT,
+    POLL_GRACE_FRACTION,
     MIN_STALE_WINDOW,
     STALE_AFTER_INTERVALS,
 )
@@ -57,8 +60,10 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
-    """Polls one cluster master on a timer and fans the result out."""
+class TensiteClusterCoordinator(
+    ActiveBluetoothDataUpdateCoordinator[ClusterReading | None]
+):
+    """Polls one cluster master and fans the result out to every battery."""
 
     def __init__(
         self,
@@ -70,22 +75,30 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
         hide_sentinel_temperatures: bool = False,
     ) -> None:
         super().__init__(
-            hass,
-            _LOGGER,
-            name=f"Tensite {address}",
-            # DataUpdateCoordinator schedules the next refresh this long
-            # after the previous one *finishes*, so it is a delay between
-            # polls rather than a fixed period. Named accordingly.
-            update_interval=timedelta(seconds=poll_delay),
+            hass=hass,
+            logger=_LOGGER,
+            address=address,
+            mode=BluetoothScanningMode.ACTIVE,
+            needs_poll_method=self._needs_poll,
+            poll_method=self._async_poll_cluster,
+            connectable=True,
         )
-        self.address = address
         self.serial = serial
         self.poll_delay = poll_delay
         #: See CONF_HIDE_SENTINEL_TEMPERATURES.
         self.hide_sentinel_temperatures = hide_sentinel_temperatures
         self._configured_expected = expected_batteries
-        #: High-water mark of batteries seen, for diagnostics only.
-        self._seen_batteries = 0
+        #: What the last full-window poll counted. This is the auto-detected
+        #: bank size: it is set only by polls that could not exit early, so it
+        #: cannot latch onto an undercount, and it drops if a battery is
+        #: removed.
+        self._learned_batteries = 0
+        #: How many batteries answered the most recent poll, before merging
+        #: forward. Lower than expected on any given poll is normal; lower
+        #: every poll is not.
+        self._reported_batteries = 0
+        #: Monotonic time of the last full-window poll.
+        self._last_full_scan: float | None = None
         #: Monotonic time of the last poll that actually returned data.
         self._last_data_at: float | None = None
         #: Monotonic time the last poll began.
@@ -110,33 +123,44 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
         #: Monotonic time of the last advertisement Home Assistant passed us.
         self._last_advertisement_at: float | None = None
 
-    def async_start(self) -> Callable[[], None]:
-        """Keep Home Assistant tracking this address, and return the unsubscribe.
+    def _needs_poll(
+        self, service_info: BluetoothServiceInfoBleak, last_poll: float | None
+    ) -> bool:
+        """Whether this advertisement should trigger a poll.
 
-        Polls are timed, so nothing here triggers one. The registration exists
-        because it is what tells Home Assistant's Bluetooth manager that this
-        address needs *connectable* access: it keeps the device in connectable
-        history, keeps a connectable scanner assigned to it, and keeps its
-        connection-slot bookkeeping alive.
+        Timed from when the previous poll *started*, not from when it finished:
+        the base class measures the latter, and the seconds a poll spends
+        holding the connection then push the next advertisement just under the
+        threshold, so it is skipped and the effective rate halves.
 
-        Dropping this when polling moved off advertisements is what broke
-        connections -- every poll after the first failed with "the proxy/adapter
-        is out of connection slots" while the adapter itself was idle and the
-        device was advertising a second earlier.
+        A grace window absorbs the rest. Advertisements jitter around their
+        cadence rather than landing on a grid, and one arriving a few seconds
+        early is the only chance for the next several minutes.
         """
-        return async_register_callback(
-            self.hass,
-            self._async_on_advertisement,
-            BluetoothCallbackMatcher(address=self.address, connectable=True),
-            BluetoothScanningMode.ACTIVE,
-        )
-
-    @callback
-    def _async_on_advertisement(
-        self, service_info: BluetoothServiceInfoBleak, change: BluetoothChange
-    ) -> None:
-        """Note that the device is alive. Polling is on a timer, so no work."""
         self._last_advertisement_at = monotonic_time_coarse()
+        if self._poll_in_progress:
+            self._polls_skipped_overlap += 1
+            return False
+        since_start = (
+            None
+            if self._last_poll_started is None
+            else monotonic_time_coarse() - self._last_poll_started
+        )
+        due = since_start is None or since_start >= self._due_after
+        _LOGGER.debug(
+            "%s: advertisement (rssi=%s) -> poll=%s (last %s, due after %.0fs)",
+            self.address,
+            service_info.rssi,
+            due,
+            "never" if since_start is None else f"{since_start:.0f}s ago",
+            self._due_after,
+        )
+        return due
+
+    @property
+    def _due_after(self) -> float:
+        """Seconds after a poll start before an advertisement is acted on."""
+        return self.poll_delay * (1.0 - POLL_GRACE_FRACTION)
 
     @property
     def seconds_since_advertisement(self) -> float | None:
@@ -204,7 +228,14 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
                 None if self.data_age is None else round(self.data_age, 1)
             ),
             "poll_in_progress": self._poll_in_progress,
-            "batteries_seen": self._seen_batteries,
+            "batteries_expected": self.expected_batteries,
+            "batteries_reported": self._reported_batteries,
+            "battery_count_forced": self.battery_count_is_forced,
+            "seconds_since_full_scan": (
+                None
+                if self.seconds_since_full_scan is None
+                else round(self.seconds_since_full_scan, 1)
+            ),
             "rssi": self.rssi,
             "seconds_since_advertisement": (
                 None
@@ -255,34 +286,62 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
     def expected_batteries(self) -> int:
         """How many batteries a poll waits for before returning early.
 
-        Only ever the explicitly configured count. Deriving it from what a
-        previous poll happened to see is a trap: the gateway round-robins the
-        bank, so an early poll can easily catch three of four batteries. Wiring
-        that back in as the exit condition would make every later poll stop at
-        three and the fourth battery would never be discovered.
+        The configured value wins when set; otherwise it is what the last
+        full-window poll counted. 0 means "not known yet", which makes a poll
+        wait out the listening window rather than exit early.
+
+        Learning this only from full-window polls is deliberate. An ordinary
+        poll stops as soon as *expected* batteries have reported, so counting
+        its results would just re-measure the exit condition -- and any
+        undercount would latch permanently. See FULL_SCAN_INTERVAL.
         """
-        return self._configured_expected
+        return self._configured_expected or self._learned_batteries
+
+    @property
+    def batteries_expected(self) -> int:
+        """Alias of expected_batteries, for the sensor of the same name."""
+        return self.expected_batteries
+
+    @property
+    def batteries_reported(self) -> int:
+        """How many batteries answered the most recent poll."""
+        return self._reported_batteries
+
+    @property
+    def battery_count_is_forced(self) -> bool:
+        """Whether the expected count comes from configuration, not detection."""
+        return bool(self._configured_expected)
+
+    @property
+    def seconds_since_full_scan(self) -> float | None:
+        """Time since the last poll that waited out the full window."""
+        if self._last_full_scan is None:
+            return None
+        return monotonic_time_coarse() - self._last_full_scan
+
+    def _is_full_scan_due(self) -> bool:
+        """Whether this poll should ignore the expected count.
+
+        Always true until one has run, so the bank size is established on the
+        very first poll rather than after an hour of guessing.
+        """
+        since = self.seconds_since_full_scan
+        return since is None or since >= FULL_SCAN_INTERVAL
 
     def _note_failure(self, reason: str) -> None:
         self._poll_failures += 1
         self._consecutive_failures += 1
         self._last_error = reason
 
-    async def _async_update_data(self) -> ClusterReading | None:
+    async def _async_poll_cluster(
+        self, service_info: BluetoothServiceInfoBleak
+    ) -> ClusterReading | None:
         """Time one poll, record how it went, and never leave the guard set.
 
-        Deliberately never raises. Raising would set ``last_update_success``
-        false and, through the base class, mark entities unavailable on a
-        single missed poll -- which on BLE happens routinely. Staleness is
-        judged by ``has_fresh_data`` instead.
+        Never raises: a failed poll keeps the last good reading rather than
+        blanking every entity, which on BLE would happen routinely. Staleness
+        is judged by ``has_fresh_data`` instead.
         """
-        if self._poll_in_progress:
-            self._polls_skipped_overlap += 1
-            _LOGGER.debug(
-                "%s: refresh declined, a poll is already running", self.address
-            )
-            return self.data
-
         started = monotonic_time_coarse()
         if self._last_poll_started is not None:
             self._last_poll_interval = started - self._last_poll_started
@@ -290,7 +349,7 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
         self._poll_in_progress = True
         self._polls += 1
         try:
-            return await self._async_read_cluster()
+            return await self._async_read_cluster(service_info)
         except Exception as err:  # noqa: BLE001 -- recorded, never propagated
             self._note_failure(f"{type(err).__name__}: {err}")
             _LOGGER.debug("%s: poll raised: %s", self.address, err)
@@ -299,14 +358,25 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
             self._last_poll_duration = monotonic_time_coarse() - started
             self._poll_in_progress = False
 
-    async def _async_read_cluster(self) -> ClusterReading | None:
+    async def _async_read_cluster(
+        self, service_info: BluetoothServiceInfoBleak
+    ) -> ClusterReading | None:
         """Connect, read the whole bank, disconnect."""
-        # There is no advertisement in hand any more, so ask Home Assistant's
-        # cache. This is the documented way to obtain a connectable device
-        # without running a scanner of our own.
-        ble_device = async_ble_device_from_address(
-            self.hass, self.address, connectable=True
-        )
+        # Prefer the BLEDevice attached to the last advertisement, which is
+        # exactly the object the advertisement-driven coordinator used to hand
+        # to establish_connection. Resolving by address instead leaked a
+        # connection slot on every successful poll -- three or four polls in,
+        # every later one failed with "the proxy/adapter is out of connection
+        # slots" while the adapter sat idle, until Home Assistant restarted.
+        # Falling back to the address lookup is still right when nothing has
+        # been heard yet.
+        ble_device = service_info.device
+        if not service_info.connectable:
+            # Reached us via a non-connectable proxy; ask for a connectable
+            # device at the same address instead.
+            ble_device = async_ble_device_from_address(
+                self.hass, self.address, connectable=True
+            )
         if ble_device is None:
             self._note_failure("not in Home Assistant's Bluetooth cache")
             _LOGGER.debug(
@@ -322,8 +392,12 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
             listen_timeout=LISTEN_TIMEOUT,
             logger=_LOGGER,
         )
+        # A full scan cannot exit early, so it is the only poll whose count
+        # can be trusted as the bank size. See FULL_SCAN_INTERVAL.
+        full_scan = self._is_full_scan_due()
+        expect = None if full_scan else (self.expected_batteries or None)
         try:
-            reading = await client.async_read(expect=self.expected_batteries or None)
+            reading = await client.async_read(expect=expect)
         except TensiteNoDataError as err:
             # Connected but the bank stayed quiet. Transient often enough that
             # dropping the last known reading would flap every entity.
@@ -341,9 +415,20 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
         # entities for that battery until a later poll happened to catch them.
         reading = merge_readings(self.data, reading)
 
+        # Count what *this* poll heard, before merge_readings folds in
+        # batteries that were quiet this time round.
+        self._reported_batteries = reading.battery_count
+        if full_scan:
+            self._learned_batteries = reading.battery_count
+            self._last_full_scan = monotonic_time_coarse()
+            _LOGGER.debug(
+                "%s: full scan found %d batteries",
+                self.address,
+                self._learned_batteries,
+            )
+
         self._last_data_at = monotonic_time_coarse()
         self._consecutive_failures = 0
-        self._seen_batteries = max(self._seen_batteries, reading.battery_count)
         if self.serial is None and reading.master_serial:
             self.serial = reading.master_serial
         _LOGGER.debug(

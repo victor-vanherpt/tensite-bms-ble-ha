@@ -41,22 +41,26 @@ DEFAULT_HIDE_SENTINEL_TEMPERATURES: Final = False
 DEFAULT_SCAN_INTERVAL: Final = 60  # seconds
 MAX_SCAN_INTERVAL: Final = 3600
 
-#: Floor on the polling interval.
+#: Floor on the poll delay.
 #:
-#: Polling is timed rather than advertisement-driven (see the coordinator), so
-#: this is a real floor and not a wish: a 10 s setting really does connect every
-#: 10 s. A poll takes 4-7 s in practice, so at the floor the gateway is busy
-#: most of the time.
+#: This is a floor on *our* side only, and the hardware sets a lower one we
+#: cannot cross. Polls are driven by advertisements (see the coordinator, which
+#: explains why they cannot be driven by a timer), and this gateway advertises
+#: to Home Assistant every 245-300 seconds. Anything below that just means
+#: "poll on every advertisement", which is as fast as this bank can be read.
 #:
-#: That matters because the *gateway* accepts one BLE central at a time -- a
-#: dedicated adapter on the Home Assistant side does not change this. Polling
-#: near the floor will make the vendor app struggle to connect. It is allowed
-#: because that is a legitimate thing to choose, not because it is free.
-#:
-#: A poll never starts while another is running, so a setting below the time a
-#: poll actually takes degrades to "as fast as possible" rather than stacking
-#: connections.
+#: It is kept low anyway so the setting never becomes the binding constraint,
+#: and so a future gateway that advertises more often needs no code change.
 MIN_SCAN_INTERVAL: Final = 10
+
+#: An advertisement is the only chance to poll, and they arrive on a jittery
+#: cadence rather than an exact grid. Requiring the full delay to have elapsed
+#: means one landing a few seconds early is thrown away and the next chance is
+#: a whole cadence later -- 289 s after the last poll, with a 300 s delay, costs
+#: another five minutes for the sake of 11 s.
+#:
+#: So accept one this close to due. A fraction so it scales with the delay.
+POLL_GRACE_FRACTION: Final = 0.1
 
 #: Upper bound on how long one poll may hold the connection. The gateway
 #: round-robins the bank at roughly 5-6 s per battery, so this needs headroom.
@@ -70,7 +74,21 @@ CONNECT_TIMEOUT: Final = 20.0
 #: enough to prove the point, and a config flow should not hang.
 PROBE_TIMEOUT: Final = 35.0
 
-DEFAULT_EXPECTED_BATTERIES: Final = 0  # 0 = wait out the listen timeout
+#: 0 means "work it out", which is the normal case. A non-zero value forces
+#: the count and is only needed when the automatic answer is wrong.
+DEFAULT_EXPECTED_BATTERIES: Final = 0
+
+#: How often to run a poll that ignores the expected count and waits out the
+#: full listening window.
+#:
+#: This is what makes auto-detection safe. Learning the count from ordinary
+#: polls alone is a trap: the gateway answers its batteries in rotation, so an
+#: early poll easily catches three of four, and if that number then became the
+#: early-exit condition every later poll would stop at three and the fourth
+#: would never be found. A periodic unbounded poll is the escape hatch -- it
+#: cannot exit early, so it sees the whole bank, and it is also the only way a
+#: battery that has been *removed* stops being expected.
+FULL_SCAN_INTERVAL: Final = 3600.0  # seconds
 
 #: How many polling intervals may pass without data before entities are
 #: reported unavailable. A single missed poll is routine on BLE; several in a

@@ -40,18 +40,21 @@ the bank is only enumerated once frames start arriving.
 
 | Level | Entity | Notes |
 |---|---|---|
-| Cluster | Batteries | count in the bank (diagnostic) |
-| Cluster | Stack voltage | mean across the bank |
-| Cluster | Min / max cell voltage, Cell imbalance | across every cell |
+| Cluster | System status | Ok / Problem across the bank, `device_class: problem` |
+| Cluster | Active alarms | how many are firing, with their names as attributes |
+| Cluster | Batteries expected / reported | detected bank size, and how many answered the last poll |
+| Cluster | Stack voltage, Min / max cell voltage, Cell imbalance | across every cell |
+| Cluster | Charging state | charging / discharging / idle, derived from current |
+| Cluster | Time between polls, Poll duration, Consecutive poll failures | diagnostic |
 | Cluster | Signal strength | RSSI, diagnostic, disabled by default |
-| Battery | Stack voltage | sum of that battery's cells |
-| Battery | Min / max cell voltage, Cell imbalance | |
-| Battery | Cells | count, diagnostic, disabled by default |
-| Cell | Voltage | the measurement everything else derives from |
-| Cluster | Fault | on when any battery is faulted; lists which |
-| Battery | Fault | on when this battery is faulted; lists which alarms |
-| Battery | *29 named alarms* | one per app alarm, diagnostic, disabled by default |
-| Battery | Relay 1–4 | matches the app's Relay tab, diagnostic, disabled by default |
+| Battery | System status | Ok / Problem for that battery |
+| Battery | Active alarms | count plus the firing alarm names |
+| Battery | *29 named alarms* | one per app alarm, `device_class: problem` |
+| Battery | Temperature sensor 1–6 | pack sensors; see [Temperatures](#temperatures) |
+| Battery | Cell 01–16 voltage | on the battery device, not a device each |
+| Battery | Stack voltage, Min / max cell voltage, Cell imbalance | |
+| Battery | Weakest / strongest cell | a cell *position*, so no statistics |
+| Battery | Relay 1–4 | diagnostic, disabled by default |
 
 **Cell imbalance** is the one worth an automation — a cell drifting away from
 its pack is the earliest visible sign of a failing cell.
@@ -85,6 +88,62 @@ established as the active state (by matching a capture against the screenshot
 taken from it); `0` and `3` both draw unhighlighted in the app, so they are not
 distinguished.
 
+## Temperatures
+
+Each battery reports four or six **pack** temperature sensors — these measure
+the pack, not individual cells. They are whole degrees Celsius, sent as an
+unsigned byte with a 50 °C offset, so the representable range is −50 to 205 °C.
+
+Two values are not measurements: **−50 °C** and **−30 °C**. A sensor reporting
+either is not returning a reading.
+
+**What they mean is not established, and the vendor app cannot tell us.** Its
+temperature page has no sentinel logic at all: it applies the −50 offset
+unconditionally and prints whatever comes out, showing a dash only when a value
+is absent entirely. There is no comparison against these values anywhere in the
+app, and no `-50`/`-30` constant in its binary. So it displays −50 °C exactly as
+it displays 25 °C, and so do we by default.
+
+The capture evidence points in a direction opposite to intuition, which is why
+nothing is claimed:
+
+| Value | Where it appears | Reads as |
+|---|---|---|
+| −30 | position 5 on *both* six-sensor packs, in every sample | a position that model never fits |
+| −50 | positions 3–4 on one pack, while an identical four-sensor pack reports real temperatures there | a genuine sensor fault |
+
+So the *systematic* one is −30 and the *unit-specific* one is −50 — the reverse
+of reading "more negative" as "more absent". Settling it needs someone to
+unplug a known-good sensor and see which value appears.
+
+**Option: "Hide non-reporting temperature sensors."** Off by default, matching
+the app. Turn it on and sensors reporting either value become `unavailable`
+instead, which keeps them out of temperature history and statistics. Only those
+two exact values are affected — a genuinely cold pack below freezing is still
+reported normally.
+
+## Not supported
+
+**SD-card status.** The protocol carries it — type `0x00`, offset `[29]`, the
+app calls it `SDStatus` — but it reads `0x00` in every capture and **these
+batteries have no SD-card slot**, so no other value can be produced to compare
+against. The app parses it and does not display it on its summary page either.
+It is decoded and exposed raw rather than interpreted, and no sensor is created
+for it.
+
+**Pack status byte.** Offset `[6]`, the app's `Status`. Only `0x00`–`0x02` seen,
+and the app renders it nowhere, so there is no wording to attach. The
+*Charging state* sensor is derived from the sign of the current, not from this
+field — that is a deliberate distinction, not an oversight.
+
+**Relay route values 0 vs 3.** Only `1` is established as active, by pairing a
+capture with the app screenshot taken from it. The app draws `0` and `3`
+identically, so they are passed through raw.
+
+**Writing anything.** Every frame this integration sends is a read request. The
+app's relay page builds no command message, so even the relays are status
+readouts — hence `binary_sensor`, not `switch`.
+
 ## Why one connection per cluster
 
 The ESP32 gateway accepts **one BLE central at a time**, and connecting to the
@@ -100,12 +159,18 @@ before expecting data.
 
 **Settings → Devices & Services → Tensite BMS → Configure**
 
-- **Polling interval** (default 300 s, min 60). Each poll holds the single
-  connection for several seconds. Cell voltages drift slowly, so frequent
-  polling costs availability and gains almost nothing.
-- **Batteries in this cluster** (default 0 = auto). Ends a poll as soon as that
-  many batteries have reported instead of waiting out the timeout. Left at 0,
-  the count is learned from the first poll and reused.
+- **Delay between polls** (default 60 s, min 60). A floor, not a schedule:
+  polls are triggered by the gateway's Bluetooth advertisements, and this
+  hardware advertises only every 4–5 minutes, so that cadence is the real
+  ceiling. Raising this polls less often; lowering it cannot poll more often
+  than the gateway advertises. Watch *Time between polls* for what is actually
+  happening.
+- **Force battery count** (default 0 = detect). The bank size is detected and
+  re-checked every hour by a poll that waits out the full listening window.
+  Set a number only to override that — for instance if a battery is offline for
+  a while and you would rather not have every poll waiting for it.
+- **Hide non-reporting temperature sensors** (default off). See
+  [Temperatures](#temperatures).
 
 ## What it reports
 

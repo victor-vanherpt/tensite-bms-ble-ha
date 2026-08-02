@@ -2384,7 +2384,7 @@ wheels = [
 
 [[package]]
 name = "tensite-bms-ble"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "../tensite-bms-ble" }
 dependencies = [
     { name = "bleak" },
@@ -2402,7 +2402,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "tensite-bms-ble-ha"
-version = "0.2.2"
+version = "0.3.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]

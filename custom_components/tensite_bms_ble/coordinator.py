@@ -415,23 +415,25 @@ class TensiteClusterCoordinator(
             _LOGGER.warning("%s: poll failed: %s", self.address, err)
             return self.data
 
+        # Count what *this* poll heard, before merge_readings folds in
+        # batteries that were quiet this time round. Taking it afterwards makes
+        # "batteries reported" report the merged total, which can never fall --
+        # so a bank losing a battery would look perfectly healthy, and a full
+        # scan could never revise the count downwards.
+        reported = reading.battery_count
+        self._reported_batteries = reported
+        if full_scan:
+            self._learned_batteries = reported
+            self._last_full_scan = monotonic_time_coarse()
+            _LOGGER.debug(
+                "%s: full scan found %d batteries", self.address, reported
+            )
+
         # Carry forward anything this poll did not observe. The gateway
         # round-robins the bank, so a poll can return a battery's summary
         # without its cells -- replacing wholesale would blank all 16 cell
         # entities for that battery until a later poll happened to catch them.
         reading = merge_readings(self.data, reading)
-
-        # Count what *this* poll heard, before merge_readings folds in
-        # batteries that were quiet this time round.
-        self._reported_batteries = reading.battery_count
-        if full_scan:
-            self._learned_batteries = reading.battery_count
-            self._last_full_scan = monotonic_time_coarse()
-            _LOGGER.debug(
-                "%s: full scan found %d batteries",
-                self.address,
-                self._learned_batteries,
-            )
 
         self._last_data_at = monotonic_time_coarse()
         self._consecutive_failures = 0

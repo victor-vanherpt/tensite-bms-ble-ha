@@ -64,13 +64,6 @@ class ClusterSensorDescription(SensorEntityDescription):
 
 CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
     ClusterSensorDescription(
-        key="battery_count",
-        translation_key="battery_count",
-        value_fn=lambda r: r.battery_count,
-        state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
-    ),
-    ClusterSensorDescription(
         key="voltage",
         translation_key="voltage",
         value_fn=lambda r: r.total_voltage,

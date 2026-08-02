@@ -43,9 +43,6 @@
   },
   "entity": {
     "sensor": {
-      "battery_count": {
-        "name": "Batteries"
-      },
       "voltage": {
         "name": "Voltage"
       },

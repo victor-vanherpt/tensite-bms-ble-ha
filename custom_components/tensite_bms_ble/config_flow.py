@@ -34,12 +34,14 @@ from tensite_bms_ble import (
 
 from .const import (
     CONF_ADDRESS,
+    CONF_AUTO_BATTERY_COUNT,
     CONF_EXPECTED_BATTERIES,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONNECT_TIMEOUT,
+    DEFAULT_AUTO_BATTERY_COUNT,
     DEFAULT_EXPECTED_BATTERIES,
     DEFAULT_HIDE_SENTINEL_TEMPERATURES,
     DEFAULT_SCAN_INTERVAL,
@@ -288,11 +290,16 @@ class TensiteOptionsFlow(OptionsFlow):
                             DEFAULT_HIDE_SENTINEL_TEMPERATURES,
                         ),
                     ): cv.boolean,
-                    # Left blank, the bank size is detected -- from the master's
-                    # roster, or failing that an hourly full-window poll. So the
-                    # only values worth typing are real bank sizes, and the
-                    # hardware tops out at eight. Clearing the box goes back to
-                    # detection, which is why there is no zero in the range.
+                    # Detection is a checkbox of its own. Home Assistant
+                    # option forms are static, so it cannot grey out the number
+                    # below; while it is on that number is ignored and kept in
+                    # step with what the bank reports.
+                    vol.Optional(
+                        CONF_AUTO_BATTERY_COUNT,
+                        default=options.get(
+                            CONF_AUTO_BATTERY_COUNT, DEFAULT_AUTO_BATTERY_COUNT
+                        ),
+                    ): cv.boolean,
                     vol.Optional(
                         CONF_EXPECTED_BATTERIES,
                         description={"suggested_value": configured},

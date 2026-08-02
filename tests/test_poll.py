@@ -107,13 +107,16 @@ class TestFullScan:
         await run_poll(coordinator, reading("A", "B", "C"))
         assert coordinator.expected_batteries == 3
 
-    async def test_configured_count_is_not_overwritten_by_detection(self, hass):
+    async def test_configured_count_survives_a_poll_when_detection_is_off(
+        self, hass
+    ):
         coordinator = TensiteClusterCoordinator(
             hass=hass,
             address=ADDRESS,
             serial=None,
             poll_delay=60,
             expected_batteries=4,
+            auto_battery_count=False,
         )
         await run_poll(coordinator, reading("A", "B"))
         assert coordinator.expected_batteries == 4

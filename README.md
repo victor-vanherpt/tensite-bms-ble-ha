@@ -194,10 +194,15 @@ before expecting data.
   ceiling. Raising this polls less often; lowering it cannot poll more often
   than the gateway advertises. Watch *Time between polls* for what is actually
   happening.
-- **Force battery count** (default 0 = detect). The bank size is detected and
-  re-checked every hour by a poll that waits out the full listening window.
-  Set a number only to override that — for instance if a battery is offline for
-  a while and you would rather not have every poll waiting for it.
+- **Detect battery count automatically** (default on). The bank master states
+  how many batteries it has, so there is normally nothing to configure. While
+  this is on, the count below is ignored and kept in step with whatever the
+  bank reports.
+- **Battery count** (1–8, the hardware maximum). Only used when detection is
+  off — for instance if a battery is offline for a while and you would rather
+  not have every poll waiting for it. Home Assistant option forms are static,
+  so the checkbox above cannot grey this field out; it stays editable but has
+  no effect while detection is on.
 - **Hide non-reporting temperature sensors** (default off). See
   [Temperatures](#temperatures).
 

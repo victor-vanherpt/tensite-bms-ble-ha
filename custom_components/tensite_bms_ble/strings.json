@@ -30,13 +30,15 @@
         "title": "Tensite BMS options",
         "data": {
           "scan_interval": "Delay between polls (seconds)",
-          "expected_batteries": "Force battery count",
-          "hide_sentinel_temperatures": "Hide non-reporting temperature sensors"
+          "expected_batteries": "Battery count",
+          "hide_sentinel_temperatures": "Hide non-reporting temperature sensors",
+          "auto_battery_count": "Detect battery count automatically"
         },
         "data_description": {
           "scan_interval": "How long to wait after one poll before another may start. It is a floor, not a schedule: polls are triggered by the gateway's Bluetooth advertisements, and this hardware advertises only every 4-5 minutes, so that cadence is the real ceiling on how often readings arrive. Raising this polls less often; lowering it cannot poll more often than the gateway advertises. Check the Time between polls sensor for what is actually happening.",
-          "expected_batteries": "Leave blank to detect the bank size, which the integration takes from the master's own roster and re-checks hourly. Type a number only to override that -- for instance if a battery is offline for a while and you would rather not have every poll waiting for it. Eight is the hardware maximum.",
-          "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 °C or -30 °C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected — a genuinely cold pack below freezing is still reported normally."
+          "expected_batteries": "Only used when automatic detection is off. A poll ends as soon as this many batteries have reported instead of waiting out the listening window. Eight is the hardware maximum.",
+          "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 °C or -30 °C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected — a genuinely cold pack below freezing is still reported normally.",
+          "auto_battery_count": "On by default. The bank master states how many batteries it has, so there is normally nothing to configure. While this is on the count below is ignored and kept in step with what the bank reports -- Home Assistant option forms cannot grey a field out, so it stays editable but has no effect."
         }
       }
     }

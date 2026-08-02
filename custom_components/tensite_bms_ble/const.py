@@ -74,6 +74,17 @@ PROBE_TIMEOUT: Final = 35.0
 
 #: 0 means "work it out", which is the normal case. A non-zero value forces
 #: the count and is only needed when the automatic answer is wrong.
+#: Whether the bank size is detected rather than typed. On by default: the
+#: master states it outright in its topology frame, so a typed value is only
+#: needed to override that.
+#:
+#: Home Assistant option forms are static -- a checkbox cannot grey out another
+#: field -- so the count field stays editable while this is on. It is simply
+#: ignored, and overwritten with whatever the bank reports, which is what makes
+#: the field readable as "what the integration currently thinks".
+CONF_AUTO_BATTERY_COUNT: Final = "auto_battery_count"
+DEFAULT_AUTO_BATTERY_COUNT: Final = True
+
 #: Largest bank the hardware supports, per the product documentation.
 #: Bounds the override so a typo cannot make every poll wait out the full
 #: listening window for batteries that cannot exist.

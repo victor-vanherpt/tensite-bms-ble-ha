@@ -79,6 +79,7 @@ class TensiteClusterCoordinator(
         poll_delay: float,
         expected_batteries: int = 0,
         hide_sentinel_temperatures: bool = False,
+        auto_battery_count: bool = True,
     ) -> None:
         super().__init__(
             hass=hass,
@@ -96,6 +97,8 @@ class TensiteClusterCoordinator(
         #: Options as they were at setup. A reload is only worth doing when
         #: these change -- see _async_update_listener.
         self.options_snapshot: dict = {}
+        #: See CONF_AUTO_BATTERY_COUNT.
+        self.auto_battery_count = auto_battery_count
         self._configured_expected = expected_batteries
         #: What the last full-window poll counted. This is the auto-detected
         #: bank size: it is set only by polls that could not exit early, so it
@@ -245,6 +248,8 @@ class TensiteClusterCoordinator(
             "batteries_expected": self.expected_batteries,
             "batteries_reported": self._reported_batteries,
             "battery_count_forced": self.battery_count_is_forced,
+            "battery_count_auto": self.auto_battery_count,
+            "batteries_detected": self.detected_batteries or None,
             "battery_count_source": self.battery_count_source,
             "roster_batteries": self._roster_batteries or None,
             "seconds_since_full_scan": (
@@ -320,21 +325,30 @@ class TensiteClusterCoordinator(
         the exit condition, and any undercount would latch permanently. See
         FULL_SCAN_INTERVAL.
         """
-        return (
-            self._configured_expected
-            or self._roster_batteries
-            or self._learned_batteries
-        )
+        if self.auto_battery_count:
+            return self.detected_batteries or self._configured_expected
+        return self._configured_expected or self.detected_batteries
+
+    @property
+    def detected_batteries(self) -> int:
+        """What the bank says it holds, 0 if it has not said yet.
+
+        The roster is the master's own statement and wins; the full-window
+        count is the fallback for when no topology frame arrives.
+        """
+        return self._roster_batteries or self._learned_batteries
 
     @property
     def battery_count_source(self) -> str:
         """Where expected_batteries came from, for diagnostics."""
-        if self._configured_expected:
+        if not self.auto_battery_count and self._configured_expected:
             return "configured"
         if self._roster_batteries:
             return "roster"
         if self._learned_batteries:
             return "full scan"
+        if self._configured_expected:
+            return "configured"
         return "unknown"
 
     @property
@@ -350,7 +364,7 @@ class TensiteClusterCoordinator(
     @property
     def battery_count_is_forced(self) -> bool:
         """Whether the expected count comes from configuration, not detection."""
-        return bool(self._configured_expected)
+        return not self.auto_battery_count and bool(self._configured_expected)
 
     @property
     def seconds_since_full_scan(self) -> float | None:

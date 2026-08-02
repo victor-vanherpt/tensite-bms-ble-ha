@@ -158,3 +158,67 @@ class TestStates:
             if e.unique_id.endswith("_batteries_expected")
         )
         assert hass.states.get(entity_id).state == "2"
+
+
+class TestBatteryCountWriteBack:
+    """Detection keeps the option field in step with what the bank reports.
+
+    Home Assistant option forms are static, so the checkbox cannot grey the
+    number field out. Writing the detected value into it is what makes the
+    field readable as "what the integration is actually using", and leaves a
+    sensible starting point if detection is later switched off.
+    """
+
+    def sync(self, hass, entry):
+        from custom_components.tensite_bms_ble import _async_sync_battery_count
+
+        _async_sync_battery_count(hass, entry, entry.runtime_data)
+
+    async def test_detected_count_is_written_into_the_options(self, hass, entry):
+        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+
+        coordinator = entry.runtime_data
+        coordinator._roster_batteries = 4
+        self.sync(hass, entry)
+        await hass.async_block_till_done()
+        assert entry.options[CONF_EXPECTED_BATTERIES] == 4
+
+    async def test_writing_it_does_not_trigger_a_reload(self, hass, entry):
+        """The snapshot must be updated with the entry, not after it.
+
+        The update listener reloads whenever options differ from the snapshot.
+        Writing one without the other would reload on the first poll and throw
+        the reading away -- the loop that listener exists to prevent.
+        """
+        coordinator = entry.runtime_data
+        coordinator._roster_batteries = 4
+        self.sync(hass, entry)
+        await hass.async_block_till_done()
+        assert coordinator.options_snapshot == dict(entry.options)
+
+    async def test_setup_alone_records_what_the_poll_found(self, hass, entry):
+        """The fixture polls a two-battery bank, so the option should say two."""
+        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+
+        assert entry.options[CONF_EXPECTED_BATTERIES] == 2
+
+    async def test_nothing_is_written_while_detection_is_off(self, hass, entry):
+        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+
+        coordinator = entry.runtime_data
+        coordinator.auto_battery_count = False
+        coordinator._roster_batteries = 4
+        self.sync(hass, entry)
+        await hass.async_block_till_done()
+        # Left at what setup found, not raised to the roster value.
+        assert entry.options[CONF_EXPECTED_BATTERIES] == 2
+
+    async def test_nothing_is_written_before_the_bank_reports(self, hass, entry):
+        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+
+        coordinator = entry.runtime_data
+        coordinator._roster_batteries = 0
+        coordinator._learned_batteries = 0
+        self.sync(hass, entry)
+        await hass.async_block_till_done()
+        assert entry.options[CONF_EXPECTED_BATTERIES] == 2

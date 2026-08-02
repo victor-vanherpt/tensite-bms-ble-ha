@@ -12,11 +12,13 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .const import (
     CONF_ADDRESS,
+    CONF_AUTO_BATTERY_COUNT,
     CONF_EXPECTED_BATTERIES,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
+    DEFAULT_AUTO_BATTERY_COUNT,
     DEFAULT_EXPECTED_BATTERIES,
     DEFAULT_HIDE_SENTINEL_TEMPERATURES,
     DEFAULT_SCAN_INTERVAL,
@@ -51,6 +53,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
         hide_sentinel_temperatures=entry.options.get(
             CONF_HIDE_SENTINEL_TEMPERATURES, DEFAULT_HIDE_SENTINEL_TEMPERATURES
         ),
+        auto_battery_count=entry.options.get(
+            CONF_AUTO_BATTERY_COUNT, DEFAULT_AUTO_BATTERY_COUNT
+        ),
     )
     entry.runtime_data = coordinator
     # What a later update is compared against; see _async_update_listener.
@@ -69,6 +74,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
     entry.async_on_unload(
         coordinator.async_add_listener(
             lambda: _async_record_membership(hass, entry, coordinator)
+        )
+    )
+    entry.async_on_unload(
+        coordinator.async_add_listener(
+            lambda: _async_sync_battery_count(hass, entry, coordinator)
         )
     )
 
@@ -145,6 +155,42 @@ def _async_record_membership(
 
     if changed:
         hass.config_entries.async_update_entry(entry, data=data)
+
+
+@callback
+def _async_sync_battery_count(
+    hass: HomeAssistant,
+    entry: TensiteConfigEntry,
+    coordinator: TensiteClusterCoordinator,
+) -> None:
+    """Write the detected bank size into the option, while detection is on.
+
+    Home Assistant option forms are static, so the checkbox cannot grey the
+    number field out. Keeping the field in step with what the bank reports is
+    the next best thing: it always shows what the integration is actually
+    using, and switching detection off leaves a sensible starting value rather
+    than a stale one.
+
+    The snapshot is updated *before* the entry, because updating an entry fires
+    the update listener, and that listener reloads whenever the options differ
+    from the snapshot. Writing one without the other would reload the
+    integration on the first poll and throw the reading away -- which is
+    exactly the loop that _async_update_listener exists to prevent.
+    """
+    if not coordinator.auto_battery_count:
+        return
+    detected = coordinator.detected_batteries
+    if not detected or entry.options.get(CONF_EXPECTED_BATTERIES) == detected:
+        return
+
+    options = {**entry.options, CONF_EXPECTED_BATTERIES: detected}
+    coordinator.options_snapshot = dict(options)
+    hass.config_entries.async_update_entry(entry, options=options)
+    _LOGGER.debug(
+        "%s: detected %d batteries, recorded in options",
+        entry.data[CONF_ADDRESS],
+        detected,
+    )
 
 
 _CELL_UNIQUE_ID = re.compile(r"^(?P<serial>.+)_cell_\d+_voltage$")

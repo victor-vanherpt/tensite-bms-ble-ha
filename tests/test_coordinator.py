@@ -143,8 +143,10 @@ class TestBatteryCount:
     def test_unknown_until_something_reports(self, hass):
         assert make_coordinator(hass).expected_batteries == 0
 
-    def test_configured_value_wins(self, hass):
-        coordinator = make_coordinator(hass, expected_batteries=4)
+    def test_configured_value_wins_when_detection_is_off(self, hass):
+        coordinator = make_coordinator(
+            hass, expected_batteries=4, auto_battery_count=False
+        )
         coordinator._learned_batteries = 2
         assert coordinator.expected_batteries == 4
         assert coordinator.battery_count_is_forced is True
@@ -206,11 +208,27 @@ class TestBatteryCountSource:
         assert coordinator.expected_batteries == 4
         assert coordinator.battery_count_source == "roster"
 
-    def test_configured_beats_the_roster(self, hass):
+    def test_the_roster_wins_while_detection_is_on(self, hass):
+        """A stale typed value must not override what the bank now says."""
         coordinator = make_coordinator(hass, expected_batteries=2)
+        coordinator._roster_batteries = 4
+        assert coordinator.expected_batteries == 4
+        assert coordinator.battery_count_source == "roster"
+
+    def test_turning_detection_off_hands_control_back(self, hass):
+        coordinator = make_coordinator(
+            hass, expected_batteries=2, auto_battery_count=False
+        )
         coordinator._roster_batteries = 4
         assert coordinator.expected_batteries == 2
         assert coordinator.battery_count_source == "configured"
+        assert coordinator.battery_count_is_forced is True
+
+    def test_detection_off_still_falls_back_when_nothing_is_typed(self, hass):
+        """Better than waiting out the window on every poll."""
+        coordinator = make_coordinator(hass, auto_battery_count=False)
+        coordinator._roster_batteries = 4
+        assert coordinator.expected_batteries == 4
 
     def test_full_scan_is_the_fallback_when_no_roster_arrives(self, hass):
         coordinator = make_coordinator(hass)

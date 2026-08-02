@@ -162,3 +162,46 @@ class TestAlarmsAndRelays:
         battery = with_battery(coordinator, relay_routes=(1, 0, 0, 0))
         assert battery.active_relays == (True, False, False, False)
         assert ROUTE_ACTIVE == 1
+
+
+class TestEntityPlacement:
+    """Where entities land on a device page.
+
+    entity_category is the only control an integration has over this: Home
+    Assistant supports exactly `config` and `diagnostic`, so a device page
+    renders at most three buckets. Real grouping needs a dashboard -- see
+    tools/make_dashboard.py.
+    """
+
+    def test_per_alarm_entities_are_diagnostic(self, hass):
+        """29 per battery would otherwise be most of the page."""
+        from homeassistant.const import EntityCategory
+
+        from custom_components.tensite_bms_ble.binary_sensor import (
+            TensiteBatteryAlarm,
+        )
+
+        coordinator = make_coordinator(hass)
+        with_battery(coordinator, alarm_bits=FAULTY_BITS)
+        alarm = TensiteBatteryAlarm(coordinator, SERIAL, ALARM_SLOTS[0])
+        assert alarm.entity_category is EntityCategory.DIAGNOSTIC
+
+    def test_diagnostic_does_not_cost_the_device_class(self, hass):
+        """It is placement only -- automations and grouping still work."""
+        from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+
+        from custom_components.tensite_bms_ble.binary_sensor import (
+            TensiteBatteryAlarm,
+        )
+
+        coordinator = make_coordinator(hass)
+        with_battery(coordinator, alarm_bits=FAULTY_BITS)
+        alarm = TensiteBatteryAlarm(coordinator, SERIAL, ALARM_SLOTS[0])
+        assert alarm.device_class is BinarySensorDeviceClass.PROBLEM
+
+    def test_the_summary_sensors_stay_primary(self):
+        """Active alarms and System status are what you put on a dashboard."""
+        from custom_components.tensite_bms_ble.sensor import BATTERY_SENSORS
+
+        active = next(d for d in BATTERY_SENSORS if d.key == "active_alarms")
+        assert active.entity_category is None

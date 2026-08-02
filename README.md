@@ -49,7 +49,7 @@ the bank is only enumerated once frames start arriving.
 | Cluster | Signal strength | RSSI, diagnostic, disabled by default |
 | Battery | System status | Ok / Problem for that battery |
 | Battery | Active alarms | count plus the firing alarm names |
-| Battery | *29 named alarms* | one per app alarm, `device_class: problem` |
+| Battery | *29 named alarms* | one per app alarm, `device_class: problem`, diagnostic |
 | Battery | Temperature sensor 1–6 | pack sensors; see [Temperatures](#temperatures) |
 | Battery | Cell 01–16 voltage | on the battery device, not a device each |
 | Battery | Stack voltage, Min / max cell voltage, Cell imbalance | |
@@ -64,6 +64,12 @@ its pack is the earliest visible sign of a failing cell.
 The BMS reports 29 named alarms, matching the vendor app's alarm page row for
 row. Each is a severity of 0-3, where the app renders 1/2/3 as "Level1/2/3
 Fault".
+
+The per-alarm entities are filed as **diagnostic**, so they appear in their
+own card rather than burying the device page -- 29 per battery is otherwise
+most of it. That is placement only: they keep their device class, still trigger
+automations, and are still enabled. See [Grouping](#grouping) for why this is
+the only lever available.
 
 Most people want the single **Fault** sensor per battery — it turns on for any
 alarm and its `active_alarms` attribute names what fired, which is enough for
@@ -143,6 +149,29 @@ identically, so they are passed through raw.
 **Writing anything.** Every frame this integration sends is a read request. The
 app's relay page builds no command message, so even the relays are status
 readouts — hence `binary_sensor`, not `switch`.
+
+## Grouping
+
+Home Assistant device pages cannot be grouped arbitrarily. An entity's only
+placement control is `entity_category`, which supports exactly two values --
+Configuration and Diagnostic -- so a device page renders at most three buckets,
+and which entities land where is fixed by the integration rather than by the
+person looking at it.
+
+With 75 entities on a battery, that is not enough. For real grouping use a
+dashboard: [`dashboard.yaml`](dashboard.yaml) has a view per device sectioned
+into Overview, Cell voltages, Temperatures, Alarms, Relays and Diagnostics.
+
+```
+Settings -> Dashboards -> Add dashboard -> open it -> Edit
+-> three-dot menu -> Raw configuration editor -> paste
+```
+
+Entity ids are installation specific, so regenerate after adding a battery:
+
+```bash
+uv run --with pyyaml python tools/make_dashboard.py root@homeassistant > dashboard.yaml
+```
 
 ## Why one connection per cluster
 

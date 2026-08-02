@@ -24,11 +24,11 @@ state worth acting on.
 A device class supplies its own state wording, so these render OK/Problem and
 custom state translations would be ignored.
 
-All of these are enabled by default so they take part in Home Assistant's
-problem groupings and can be triggered on directly. That is 29 alarms per
-battery, nearly all of which read OK indefinitely -- ``sensor.*_active_alarms``
-exists as the compact view over the same data, carrying a count as its state
-and the firing alarms as attributes.
+All of these are enabled by default so they can be triggered on directly. The
+per-alarm ones are filed as diagnostic, which is the only lever an integration
+has over placement: 29 per battery would otherwise be most of the device page.
+``sensor.*_active_alarms`` is the compact view over the same data -- a count as
+its state, the firing alarms as attributes -- and stays a primary sensor.
 """
 
 from __future__ import annotations
@@ -161,14 +161,17 @@ class TensiteBatteryAlarm(TensiteEntity, BinarySensorEntity):
     """One named alarm from the app's alarm page, for one battery."""
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    # Not EntityCategory.DIAGNOSTIC: that category is for technical detail that
-    # does not affect the primary function (signal strength, frame counters). A
-    # fault alarm is a primary signal, and diagnostic entities are filed away
-    # from the problem groupings these are meant to feed.
+    # Diagnostic purely for placement. Twenty-nine of these per battery is most
+    # of a device page, and this category is the only lever Home Assistant
+    # gives an integration over where entities land -- it puts them in their
+    # own card instead of the main sensor list.
     #
-    # Enabled by default so every alarm joins those groupings and can be
-    # triggered on without being switched on by hand. That is 29 per battery,
-    # nearly all reading OK forever; "Active Alarms" stays the compact view.
+    # It costs nothing that matters here: a diagnostic entity still holds its
+    # device class, still triggers automations, and is still enabled. The only
+    # real effect is that it is left out of auto-generated dashboards, and the
+    # per-alarm entities were never the thing to put on a dashboard anyway --
+    # "Active alarms" is, and that stays a primary sensor.
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,

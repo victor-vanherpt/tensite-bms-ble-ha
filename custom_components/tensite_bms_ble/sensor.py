@@ -221,16 +221,6 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
     ),
     ClusterSensorDescription(
-        key="cell_sum_voltage",
-        translation_key="cell_sum_voltage",
-        value_fn=lambda r: r.total_voltage,
-        native_unit_of_measurement=VOLT,
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=2,
-        entity_registry_enabled_default=False,
-    ),
-    ClusterSensorDescription(
         key="min_cell_voltage",
         translation_key="min_cell_voltage",
         value_fn=lambda r: r.min_cell_mv,

@@ -36,7 +36,7 @@
       "init": {
         "title": "Tensite BMS options",
         "data": {
-          "scan_interval": "Poll delay (seconds)",
+          "scan_interval": "Delay between polls (seconds)",
           "expected_batteries": "Batteries in this cluster",
           "hide_sentinel_temperatures": "Hide non-reporting temperature sensors"
         },
@@ -114,7 +114,7 @@
         "name": "Energy discharged today"
       },
       "status": {
-        "name": "Status",
+        "name": "Charging state",
         "state": {
           "charging": "Charging",
           "discharging": "Discharging",

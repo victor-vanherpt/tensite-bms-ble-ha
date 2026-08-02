@@ -44,6 +44,7 @@ from .const import (
     DEFAULT_HIDE_SENTINEL_TEMPERATURES,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MAX_EXPECTED_BATTERIES,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
     PROBE_TIMEOUT,
@@ -77,6 +78,8 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
         self._serial: str | None = None
         self._members: list[str] = []
         self._master_serial: str | None = None
+        #: Bank size from the master's topology frame, 0 if none arrived.
+        self._roster: int = 0
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -161,11 +164,15 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
         self._members = sorted(reading.batteries)
         if reading.master_serial:
             self._master_serial = reading.master_serial
+        # The master's topology frame states the bank size outright, so a probe
+        # that catches one knows the answer without waiting to see who replies.
+        self._roster = reading.roster_count or 0
         _LOGGER.info(
-            "%s: reports %d batteries (%s)",
+            "%s: probe heard %d batteries (%s); roster says %s",
             self._address,
             reading.battery_count,
             ", ".join(self._members),
+            self._roster or "nothing yet",
         )
         return None
 
@@ -222,9 +229,10 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_SERIAL: self._serial,
                 CONF_MEMBER_SERIALS: self._members,
             },
-            # 0 = detect the bank size automatically; the coordinator
-            # re-establishes it hourly with a full-window poll. The option
-            # exists to override that, not to be answered up front.
+            # 0 = detect the bank size. The coordinator prefers the
+            # master's own roster and falls back to an hourly full-window
+            # poll, so there is nothing to answer up front; the option exists
+            # only to override that.
             options={CONF_EXPECTED_BATTERIES: DEFAULT_EXPECTED_BATTERIES},
         )
 
@@ -269,7 +277,7 @@ class TensiteOptionsFlow(OptionsFlow):
                         default=options.get(
                             CONF_EXPECTED_BATTERIES, DEFAULT_EXPECTED_BATTERIES
                         ),
-                    ): vol.All(cv.positive_int, vol.Range(min=0, max=32)),
+                    ): vol.All(cv.positive_int, vol.Range(min=0, max=MAX_EXPECTED_BATTERIES)),
                 }
             ),
         )

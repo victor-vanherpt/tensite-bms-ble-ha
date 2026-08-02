@@ -67,6 +67,9 @@ async def async_get_config_entry_diagnostics(
     data["reading"] = {
         "master_serial": reading.master_serial,
         "battery_count": reading.battery_count,
+        # Non-null only if a type-0x32 topology frame arrived. Recorded to
+        # find out whether these reach us at all outside the vendor app.
+        "roster_count": reading.roster_count,
         "updated_at": reading.updated_at.isoformat(),
         # A climbing reject ratio means frames are arriving but failing CRC or
         # unstuffing, which looks identical to "not polling" from the outside.

@@ -175,3 +175,31 @@ class TestPollAccounting:
         assert coordinator.last_poll_interval is None
         await run_poll(coordinator, reading("A"))
         assert coordinator.last_poll_interval is not None
+
+
+class TestRoster:
+    """A topology frame in the reading is adopted as the bank size."""
+
+    async def test_roster_is_taken_from_the_reading(self, coordinator):
+        reading_with_roster = ClusterReading(
+            address=ADDRESS,
+            master_serial="A",
+            batteries={"A": battery("A", 0x01A0)},
+            roster_count=4,
+        )
+        await run_poll(coordinator, reading_with_roster)
+        assert coordinator.expected_batteries == 4
+        assert coordinator.battery_count_source == "roster"
+
+    async def test_a_poll_without_one_leaves_the_roster_alone(self, coordinator):
+        await run_poll(
+            coordinator,
+            ClusterReading(
+                address=ADDRESS,
+                master_serial="A",
+                batteries={"A": battery("A", 0x01A0)},
+                roster_count=4,
+            ),
+        )
+        await run_poll(coordinator, reading("A", "B"))
+        assert coordinator.expected_batteries == 4

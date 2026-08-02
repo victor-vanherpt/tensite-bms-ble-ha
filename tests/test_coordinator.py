@@ -190,3 +190,33 @@ class TestConstants:
 
     def test_grace_leaves_most_of_the_delay_intact(self):
         assert 0 < POLL_GRACE_FRACTION <= 0.25
+
+
+class TestBatteryCountSource:
+    """Where the expected count comes from, in priority order.
+
+    The master's topology frame states the bank size outright, so when one
+    arrives there is nothing to infer -- it beats counting who answered.
+    """
+
+    def test_roster_beats_a_full_scan(self, hass):
+        coordinator = make_coordinator(hass)
+        coordinator._learned_batteries = 3
+        coordinator._roster_batteries = 4
+        assert coordinator.expected_batteries == 4
+        assert coordinator.battery_count_source == "roster"
+
+    def test_configured_beats_the_roster(self, hass):
+        coordinator = make_coordinator(hass, expected_batteries=2)
+        coordinator._roster_batteries = 4
+        assert coordinator.expected_batteries == 2
+        assert coordinator.battery_count_source == "configured"
+
+    def test_full_scan_is_the_fallback_when_no_roster_arrives(self, hass):
+        coordinator = make_coordinator(hass)
+        coordinator._learned_batteries = 4
+        assert coordinator.expected_batteries == 4
+        assert coordinator.battery_count_source == "full scan"
+
+    def test_unknown_until_something_says_otherwise(self, hass):
+        assert make_coordinator(hass).battery_count_source == "unknown"

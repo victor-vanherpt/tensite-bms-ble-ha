@@ -102,6 +102,11 @@ class TensiteClusterCoordinator(
         #: cannot latch onto an undercount, and it drops if a battery is
         #: removed.
         self._learned_batteries = 0
+        #: What the master's own topology frame says the bank holds. This
+        #: is the authoritative answer when it arrives -- it is the
+        #: gateway's own roster, not something inferred from who happened
+        #: to answer a poll.
+        self._roster_batteries = 0
         #: How many batteries answered the most recent poll, before merging
         #: forward. Lower than expected on any given poll is normal; lower
         #: every poll is not.
@@ -240,6 +245,8 @@ class TensiteClusterCoordinator(
             "batteries_expected": self.expected_batteries,
             "batteries_reported": self._reported_batteries,
             "battery_count_forced": self.battery_count_is_forced,
+            "battery_count_source": self.battery_count_source,
+            "roster_batteries": self._roster_batteries or None,
             "seconds_since_full_scan": (
                 None
                 if self.seconds_since_full_scan is None
@@ -295,16 +302,40 @@ class TensiteClusterCoordinator(
     def expected_batteries(self) -> int:
         """How many batteries a poll waits for before returning early.
 
-        The configured value wins when set; otherwise it is what the last
-        full-window poll counted. 0 means "not known yet", which makes a poll
-        wait out the listening window rather than exit early.
+        In order of preference:
 
-        Learning this only from full-window polls is deliberate. An ordinary
-        poll stops as soon as *expected* batteries have reported, so counting
-        its results would just re-measure the exit condition -- and any
-        undercount would latch permanently. See FULL_SCAN_INTERVAL.
+        1. the configured override, when set;
+        2. the bank roster, when the master has sent a type-0x32 topology
+           frame -- this is the gateway's own count, so it is authoritative
+           and needs no inference at all;
+        3. what the last full-window poll counted.
+
+        0 means "not known yet", which makes a poll wait out the listening
+        window rather than exit early.
+
+        The third source exists because it is the only one available if the
+        topology frame never arrives, and it is deliberately fed only by
+        full-window polls: an ordinary poll stops as soon as *expected*
+        batteries have reported, so counting its results would just re-measure
+        the exit condition, and any undercount would latch permanently. See
+        FULL_SCAN_INTERVAL.
         """
-        return self._configured_expected or self._learned_batteries
+        return (
+            self._configured_expected
+            or self._roster_batteries
+            or self._learned_batteries
+        )
+
+    @property
+    def battery_count_source(self) -> str:
+        """Where expected_batteries came from, for diagnostics."""
+        if self._configured_expected:
+            return "configured"
+        if self._roster_batteries:
+            return "roster"
+        if self._learned_batteries:
+            return "full scan"
+        return "unknown"
 
     @property
     def batteries_expected(self) -> int:
@@ -425,6 +456,8 @@ class TensiteClusterCoordinator(
         # scan could never revise the count downwards.
         reported = reading.battery_count
         self._reported_batteries = reported
+        if reading.roster_count:
+            self._roster_batteries = reading.roster_count
         if full_scan:
             self._learned_batteries = reported
             self._last_full_scan = monotonic_time_coarse()

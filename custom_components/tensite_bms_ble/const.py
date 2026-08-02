@@ -74,6 +74,11 @@ PROBE_TIMEOUT: Final = 35.0
 
 #: 0 means "work it out", which is the normal case. A non-zero value forces
 #: the count and is only needed when the automatic answer is wrong.
+#: Largest bank the hardware supports, per the product documentation.
+#: Bounds the override so a typo cannot make every poll wait out the full
+#: listening window for batteries that cannot exist.
+MAX_EXPECTED_BATTERIES: Final = 8
+
 DEFAULT_EXPECTED_BATTERIES: Final = 0
 
 #: How often to run a poll that ignores the expected count and waits out the

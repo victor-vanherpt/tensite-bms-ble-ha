@@ -20,6 +20,9 @@ CONF_SERIAL: Final = "serial"
 #: rather than offered as three more clusters to add.
 CONF_MEMBER_SERIALS: Final = "member_serials"
 CONF_EXPECTED_BATTERIES: Final = "expected_batteries"
+#: Storage key only. The setting is a *delay* between polls, not a period,
+#: and is labelled that way in the UI -- but the key stays as-is so existing
+#: configurations keep their value.
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 
 #: When true, pack temperature sensors reporting a fault sentinel (-50 C or

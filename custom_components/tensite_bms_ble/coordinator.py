@@ -65,7 +65,7 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
         hass: HomeAssistant,
         address: str,
         serial: str | None,
-        scan_interval: float,
+        poll_delay: float,
         expected_batteries: int = 0,
         hide_sentinel_temperatures: bool = False,
     ) -> None:
@@ -73,11 +73,14 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
             hass,
             _LOGGER,
             name=f"Tensite {address}",
-            update_interval=timedelta(seconds=scan_interval),
+            # DataUpdateCoordinator schedules the next refresh this long
+            # after the previous one *finishes*, so it is a delay between
+            # polls rather than a fixed period. Named accordingly.
+            update_interval=timedelta(seconds=poll_delay),
         )
         self.address = address
         self.serial = serial
-        self.scan_interval = scan_interval
+        self.poll_delay = poll_delay
         #: See CONF_HIDE_SENTINEL_TEMPERATURES.
         self.hide_sentinel_temperatures = hide_sentinel_temperatures
         self._configured_expected = expected_batteries
@@ -161,7 +164,7 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
     def stale_after(self) -> float:
         """Seconds without data before entities report unavailable."""
         return (
-            max(self.scan_interval * STALE_AFTER_INTERVALS, MIN_STALE_WINDOW)
+            max(self.poll_delay * STALE_AFTER_INTERVALS, MIN_STALE_WINDOW)
             + LISTEN_TIMEOUT
         )
 
@@ -180,7 +183,7 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
     def poll_health(self) -> dict[str, object]:
         """Everything needed to answer "is polling working, and if not why?"."""
         return {
-            "configured_interval_s": self.scan_interval,
+            "configured_delay_s": self.poll_delay,
             "stale_after_s": round(self.stale_after, 1),
             "achieved_interval_s": (
                 None

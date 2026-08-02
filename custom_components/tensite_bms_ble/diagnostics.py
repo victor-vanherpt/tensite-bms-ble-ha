@@ -46,8 +46,8 @@ async def async_get_config_entry_diagnostics(
             "options": dict(entry.options),
         },
         "limits": {
-            "min_scan_interval_s": MIN_SCAN_INTERVAL,
-            "max_scan_interval_s": MAX_SCAN_INTERVAL,
+            "min_poll_delay_s": MIN_SCAN_INTERVAL,
+            "max_poll_delay_s": MAX_SCAN_INTERVAL,
             "connect_timeout_s": CONNECT_TIMEOUT,
             "listen_timeout_s": LISTEN_TIMEOUT,
         },

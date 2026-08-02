@@ -36,12 +36,12 @@
       "init": {
         "title": "Tensite BMS options",
         "data": {
-          "scan_interval": "Polling interval (seconds)",
+          "scan_interval": "Poll delay (seconds)",
           "expected_batteries": "Batteries in this cluster",
           "hide_sentinel_temperatures": "Hide non-reporting temperature sensors"
         },
         "data_description": {
-          "scan_interval": "Seconds between polls. Polling is on a timer, so this is exact rather than a target. A poll takes 4-7 seconds and the battery gateway accepts only one Bluetooth connection at a time, so short intervals will keep the vendor app from connecting. Below about 60 seconds you are mostly sampling noise -- cell voltages drift by a few millivolts over minutes. A new poll never starts while one is still running.",
+          "scan_interval": "How long to wait after one poll finishes before starting the next. It is a delay, not a fixed period: a poll itself takes 4-7 seconds, so a 60 second delay produces a reading roughly every 66 seconds. The battery gateway accepts only one Bluetooth connection at a time, so a short delay will keep the Tensite app from connecting. Below about a minute you are mostly sampling noise, since cell voltages drift by a few millivolts over minutes -- short delays are for watching something happen, not for logging. A new poll never starts while one is still running.",
           "expected_batteries": "How many batteries are in this cluster. Set it and each poll ends as soon as they have all reported, which is much quicker. Left at 0, every poll waits out the full listening window — slower, but it cannot miss a battery that reports late.",
           "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 °C or -30 °C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected — a genuinely cold pack below freezing is still reported normally."
         }
@@ -93,7 +93,7 @@
         "name": "Cell {index} voltage"
       },
       "faulty_temperature_sensors": {
-        "name": "Faulty temperature sensors"
+        "name": "Non-reporting temperature sensors"
       },
       "rssi": {
         "name": "Signal strength"
@@ -128,21 +128,21 @@
         "name": "Strongest cell"
       },
       "active_alarms": {
-        "name": "Active Alarms"
+        "name": "Active alarms"
       },
       "poll_interval": {
-        "name": "Poll Interval"
+        "name": "Time between polls"
       },
       "poll_duration": {
-        "name": "Poll Duration"
+        "name": "Poll duration"
       },
       "consecutive_failures": {
-        "name": "Consecutive Poll Failures"
+        "name": "Consecutive poll failures"
       }
     },
     "binary_sensor": {
       "system_status": {
-        "name": "System Status"
+        "name": "System status"
       }
     }
   }

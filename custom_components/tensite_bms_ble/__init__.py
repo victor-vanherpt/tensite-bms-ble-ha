@@ -55,7 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
         hass=hass,
         address=address,
         serial=serial,
-        scan_interval=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        poll_delay=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         expected_batteries=expected,
         hide_sentinel_temperatures=entry.options.get(
             CONF_HIDE_SENTINEL_TEMPERATURES, DEFAULT_HIDE_SENTINEL_TEMPERATURES
@@ -99,7 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
         "%s: set up (serial=%s, interval=%ss, advertisement seen=%s)",
         address,
         serial,
-        coordinator.scan_interval,
+        coordinator.poll_delay,
         coordinator.available,
     )
     return True

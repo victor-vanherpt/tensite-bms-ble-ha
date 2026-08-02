@@ -36,20 +36,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
     address: str = entry.data[CONF_ADDRESS]
     serial: str | None = entry.data.get(CONF_SERIAL)
 
-    # Entries created before the battery count was asked for at setup time
-    # adopt the bank size already learned from polling, so they get the same
-    # early-exit behaviour without the user having to go and configure it.
+    # No adoption of a count from previously seen members here. That predates
+    # the roster: the master states the bank size outright, so writing a
+    # remembered count into the options would only override the authoritative
+    # answer with a stale guess.
     expected = entry.options.get(CONF_EXPECTED_BATTERIES, DEFAULT_EXPECTED_BATTERIES)
-    if not expected and (members := entry.data.get(CONF_MEMBER_SERIALS)):
-        expected = len(members)
-        hass.config_entries.async_update_entry(
-            entry, options={**entry.options, CONF_EXPECTED_BATTERIES: expected}
-        )
-        _LOGGER.info(
-            "%s: adopted a battery count of %d from previously seen members",
-            address,
-            expected,
-        )
 
     coordinator = TensiteClusterCoordinator(
         hass=hass,

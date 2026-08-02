@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 from tensite_bms_ble import ClusterReading, TensiteError, TensiteNoDataError
 
 from custom_components.tensite_bms_ble.const import (
@@ -187,3 +188,42 @@ class TestStrings:
         described = strings["options"]["step"]["init"]["data_description"]
         assert set(described) <= set(data)
         assert CONF_SCAN_INTERVAL in data
+
+
+class TestBatteryCountField:
+    """The override is a typed number, and blank means "detect it"."""
+
+    async def test_blank_is_stored_as_absent_not_null(self, hass):
+        """Otherwise "not set" and "set to nothing" behave differently."""
+        from custom_components.tensite_bms_ble.config_flow import TensiteOptionsFlow
+
+        entry = MockConfigEntry(domain=DOMAIN, options={CONF_EXPECTED_BATTERIES: 4})
+        entry.add_to_hass(hass)
+        flow = TensiteOptionsFlow()
+        flow.hass = hass
+        flow.handler = entry.entry_id
+
+        result = await flow.async_step_init(
+            {CONF_SCAN_INTERVAL: 60, CONF_EXPECTED_BATTERIES: None}
+        )
+        assert CONF_EXPECTED_BATTERIES not in result["data"]
+
+    def test_range_is_one_to_the_hardware_maximum(self):
+        """Zero is not offered: blank already means detect."""
+        from custom_components.tensite_bms_ble.const import MAX_EXPECTED_BATTERIES
+
+        assert MAX_EXPECTED_BATTERIES == 8
+
+    async def test_a_typed_count_survives(self, hass):
+        from custom_components.tensite_bms_ble.config_flow import TensiteOptionsFlow
+
+        entry = MockConfigEntry(domain=DOMAIN, options={})
+        entry.add_to_hass(hass)
+        flow = TensiteOptionsFlow()
+        flow.hass = hass
+        flow.handler = entry.entry_id
+
+        result = await flow.async_step_init(
+            {CONF_SCAN_INTERVAL: 60, CONF_EXPECTED_BATTERIES: 4}
+        )
+        assert result["data"][CONF_EXPECTED_BATTERIES] == 4

@@ -23,7 +23,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, selector
 from tensite_bms_ble import (
     SERIAL_MARKER,
     TensiteClusterClient,
@@ -249,21 +249,37 @@ class TensiteOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            # A blank battery-count box comes back as None. Drop it rather than
+            # storing a null, so "not set" and "set to nothing" are the same
+            # thing and both mean "detect it".
+            return self.async_create_entry(
+                data={k: v for k, v in user_input.items() if v is not None}
+            )
 
         options = self.config_entry.options
+        configured = options.get(CONF_EXPECTED_BATTERIES) or None
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    # Number boxes rather than sliders: both of these are
+                    # values people type deliberately, not ones they scrub to.
                     vol.Optional(
                         CONF_SCAN_INTERVAL,
                         default=options.get(
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(
-                        cv.positive_int,
-                        vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+                        selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=MIN_SCAN_INTERVAL,
+                                max=MAX_SCAN_INTERVAL,
+                                step=1,
+                                unit_of_measurement="s",
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Coerce(int),
                     ),
                     vol.Optional(
                         CONF_HIDE_SENTINEL_TEMPERATURES,
@@ -272,12 +288,28 @@ class TensiteOptionsFlow(OptionsFlow):
                             DEFAULT_HIDE_SENTINEL_TEMPERATURES,
                         ),
                     ): cv.boolean,
+                    # Left blank, the bank size is detected -- from the master's
+                    # roster, or failing that an hourly full-window poll. So the
+                    # only values worth typing are real bank sizes, and the
+                    # hardware tops out at eight. Clearing the box goes back to
+                    # detection, which is why there is no zero in the range.
                     vol.Optional(
                         CONF_EXPECTED_BATTERIES,
-                        default=options.get(
-                            CONF_EXPECTED_BATTERIES, DEFAULT_EXPECTED_BATTERIES
+                        description={"suggested_value": configured},
+                    ): vol.Any(
+                        None,
+                        vol.All(
+                            selector.NumberSelector(
+                                selector.NumberSelectorConfig(
+                                    min=1,
+                                    max=MAX_EXPECTED_BATTERIES,
+                                    step=1,
+                                    mode=selector.NumberSelectorMode.BOX,
+                                )
+                            ),
+                            vol.Coerce(int),
                         ),
-                    ): vol.All(cv.positive_int, vol.Range(min=0, max=MAX_EXPECTED_BATTERIES)),
+                    ),
                 }
             ),
         )

@@ -43,15 +43,13 @@ MAX_SCAN_INTERVAL: Final = 3600
 
 #: Floor on the poll delay.
 #:
-#: This is a floor on *our* side only, and the hardware sets a lower one we
-#: cannot cross. Polls are driven by advertisements (see the coordinator, which
-#: explains why they cannot be driven by a timer), and this gateway advertises
-#: to Home Assistant every 245-300 seconds. Anything below that just means
-#: "poll on every advertisement", which is as fast as this bank can be read.
-#:
-#: It is kept low anyway so the setting never becomes the binding constraint,
-#: and so a future gateway that advertises more often needs no code change.
-MIN_SCAN_INTERVAL: Final = 10
+#: Equal to the default, because below it the setting does nothing measurable.
+#: Polls are triggered by advertisements and this gateway advertises every
+#: 245-300 seconds, so any delay shorter than that cadence means the same
+#: thing: "poll on every advertisement". A 10 second option was offered
+#: briefly; it was indistinguishable from 60 in practice and only implied a
+#: control that does not exist.
+MIN_SCAN_INTERVAL: Final = 60
 
 #: An advertisement is the only chance to poll, and they arrive on a jittery
 #: cadence rather than an exact grid. Requiring the full delay to have elapsed

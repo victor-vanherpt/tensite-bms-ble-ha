@@ -15,10 +15,8 @@ from __future__ import annotations
 
 import re
 
-from homeassistant.components.bluetooth.passive_update_coordinator import (
-    PassiveBluetoothCoordinatorEntity,
-)
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
@@ -87,24 +85,15 @@ def cell_device_info(serial: str, index: int) -> DeviceInfo:
     )
 
 
-class TensiteEntity(PassiveBluetoothCoordinatorEntity[TensiteClusterCoordinator]):
+class TensiteEntity(CoordinatorEntity[TensiteClusterCoordinator]):
     """Base for every entity in this integration.
 
-    Built on ``PassiveBluetoothCoordinatorEntity`` rather than the general
-    ``CoordinatorEntity``: Bluetooth coordinators track liveness through
-    advertisements and expose ``available``, where ``CoordinatorEntity``
-    expects a ``last_update_success`` flag that these coordinators do not have.
-
-    Availability is deliberately *not* the inherited advertisement-freshness
-    check. Home Assistant suppresses repeat advertisements whose content has
-    not changed, and this gateway broadcasts constant manufacturer data -- so
-    in practice its advertisements only reach us about once every ten minutes,
-    and Home Assistant marks it unavailable in between. Tying entities to that
-    made every reading flap to unavailable for most of each interval despite
-    polls succeeding perfectly.
-
-    What matters for a mains-powered device we actively poll is whether a
-    recent poll produced data, so that is what is used.
+    Availability is deliberately *not* the inherited ``last_update_success``.
+    A single failed poll is routine on BLE, and letting one blank every reading
+    made entities flap constantly while polls were in fact succeeding most of
+    the time. What matters for a mains-powered device we actively poll is
+    whether a recent poll produced data at all, which is time-based and
+    indifferent to how many individual attempts were missed.
     """
 
     _attr_has_entity_name = True

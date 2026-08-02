@@ -36,28 +36,20 @@ MAX_SCAN_INTERVAL: Final = 3600
 
 #: Floor on the polling interval.
 #:
-#: Deliberately *not* set from the worst-case poll cost. A poll can in theory
-#: occupy the gateway for CONNECT_TIMEOUT + LISTEN_TIMEOUT (80 s), but that is
-#: the pathological case where the bank never finishes reporting; a normal poll
-#: takes 4-7 s. Sizing the floor for the worst case would penalise every user
-#: for a case that is handled anyway: the coordinator refuses to start a poll
-#: while one is running, so a slow poll delays the next one instead of stacking
+#: Polling is timed rather than advertisement-driven (see the coordinator), so
+#: this is a real floor and not a wish: a 10 s setting really does connect every
+#: 10 s. A poll takes 4-7 s in practice, so at the floor the gateway is busy
+#: most of the time.
+#:
+#: That matters because the *gateway* accepts one BLE central at a time -- a
+#: dedicated adapter on the Home Assistant side does not change this. Polling
+#: near the floor will make the vendor app struggle to connect. It is allowed
+#: because that is a legitimate thing to choose, not because it is free.
+#:
+#: A poll never starts while another is running, so a setting below the time a
+#: poll actually takes degrades to "as fast as possible" rather than stacking
 #: connections.
-#:
-#: What remains is not starving other clients of the single BLE slot. At 30 s
-#: with a typical 6 s poll the radio is idle ~80% of the time, which leaves
-#: room for the vendor app.
-MIN_SCAN_INTERVAL: Final = 30
-
-#: An advertisement is the only chance to poll, and they arrive on a jittery
-#: cadence rather than an exact grid. Requiring the full interval to have
-#: elapsed means an advertisement landing a few seconds early is thrown away
-#: and the next chance is a whole cadence later -- 289 s after the last poll,
-#: with a 300 s interval, costs another five minutes for the sake of 11 s.
-#:
-#: So accept one this close to due. Expressed as a fraction so it scales: at a
-#: 30 s interval the grace is 3 s, not 30.
-POLL_GRACE_FRACTION: Final = 0.1
+MIN_SCAN_INTERVAL: Final = 10
 
 #: Upper bound on how long one poll may hold the connection. The gateway
 #: round-robins the bank at roughly 5-6 s per battery, so this needs headroom.

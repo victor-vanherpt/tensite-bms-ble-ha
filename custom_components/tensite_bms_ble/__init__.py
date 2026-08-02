@@ -63,10 +63,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
     )
     entry.runtime_data = coordinator
 
-    # Start the coordinator *before* forwarding platforms, so it is already
-    # listening for advertisements by the time entities are created.
-    # async_start registers the Bluetooth callbacks and returns the unsubscribe.
+    # Do the first poll before forwarding platforms, so entities are created
+    # against real data and can size themselves (cell counts, temperature
+    # sensor counts, relay routes) on the first pass.
+    #
+    # async_refresh rather than async_config_entry_first_refresh: the latter
+    # raises ConfigEntryNotReady when a poll fails, which for a Bluetooth
+    # device that is merely out of range for a moment means setup retry loops
+    # and no entities at all. A failed first poll here just means the timer
+    # picks it up.
+    # Register with the Bluetooth manager first. This does not trigger
+    # polls -- those are timed -- but without it Home Assistant stops
+    # treating the address as one needing connectable access, and
+    # connections fail with bogus "out of connection slots" errors.
     entry.async_on_unload(coordinator.async_start())
+    await coordinator.async_refresh()
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(
         coordinator.async_add_listener(

@@ -12,10 +12,17 @@
         "data": {
           "address": "Bluetooth device"
         }
+      },
+      "battery_count": {
+        "title": "Batteries in this cluster",
+        "description": "The probe heard back from {found} battery/batteries ({serials}).\n\nNothing in the protocol reports the bank size, and the gateway answers its batteries in rotation, so a single probe can undercount. Confirm the real number: each poll then ends as soon as they have all reported, instead of always waiting out the listening window.",
+        "data": {
+          "expected_batteries": "Number of batteries"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Could not connect. The gateway accepts only one Bluetooth connection at a time, so check nothing else is talking to it — another script, an add-on, or the Tensite app.",
+      "cannot_connect": "Could not connect. The gateway accepts only one Bluetooth connection at a time, so check nothing else is talking to it \u2014 another script, an add-on, or the Tensite app.",
       "no_batteries": "Connected, but this battery reported no data. It may not be relaying for its cluster. Try the bank master instead."
     },
     "abort": {
@@ -30,25 +37,101 @@
         "title": "Tensite BMS options",
         "data": {
           "scan_interval": "Polling interval (seconds)",
-          "expected_batteries": "Batteries in this cluster"
+          "expected_batteries": "Batteries in this cluster",
+          "hide_sentinel_temperatures": "Hide non-reporting temperature sensors"
         },
         "data_description": {
           "scan_interval": "The gateway accepts only one Bluetooth connection at a time, and each poll holds it for several seconds. Cell voltages drift slowly, so polling often gains little.",
-          "expected_batteries": "How many batteries are in this cluster. Set it and each poll ends as soon as they have all reported, which is much quicker. Left at 0, every poll waits out the full listening window — slower, but it cannot miss a battery that reports late."
+          "expected_batteries": "How many batteries are in this cluster. Set it and each poll ends as soon as they have all reported, which is much quicker. Left at 0, every poll waits out the full listening window \u2014 slower, but it cannot miss a battery that reports late.",
+          "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 \u00b0C or -30 \u00b0C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected \u2014 a genuinely cold pack below freezing is still reported normally."
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "battery_count": { "name": "Batteries" },
-      "stack_voltage": { "name": "Stack voltage" },
-      "min_cell_voltage": { "name": "Minimum cell voltage" },
-      "max_cell_voltage": { "name": "Maximum cell voltage" },
-      "cell_delta": { "name": "Cell imbalance" },
-      "cell_count": { "name": "Cells" },
-      "cell_voltage": { "name": "Voltage" },
-      "rssi": { "name": "Signal strength" }
+      "battery_count": {
+        "name": "Batteries"
+      },
+      "voltage": {
+        "name": "Voltage"
+      },
+      "current": {
+        "name": "Current"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "soc": {
+        "name": "State of charge"
+      },
+      "max_temperature": {
+        "name": "Maximum temperature"
+      },
+      "min_temperature": {
+        "name": "Minimum temperature"
+      },
+      "pack_temperature": {
+        "name": "Temperature sensor {index}"
+      },
+      "cell_sum_voltage": {
+        "name": "Cell sum voltage"
+      },
+      "min_cell_voltage": {
+        "name": "Minimum cell voltage"
+      },
+      "max_cell_voltage": {
+        "name": "Maximum cell voltage"
+      },
+      "cell_delta": {
+        "name": "Cell imbalance"
+      },
+      "cell_count": {
+        "name": "Cells"
+      },
+      "cell_voltage": {
+        "name": "Cell {index} voltage"
+      },
+      "faulty_temperature_sensors": {
+        "name": "Faulty temperature sensors"
+      },
+      "rssi": {
+        "name": "Signal strength"
+      },
+      "cells_updated_at": {
+        "name": "Cell voltages updated"
+      },
+      "rejected_frames": {
+        "name": "Rejected frames"
+      },
+      "reject_ratio": {
+        "name": "Frame reject rate"
+      },
+      "daily_charge": {
+        "name": "Energy charged today"
+      },
+      "daily_discharge": {
+        "name": "Energy discharged today"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "charging": "Charging",
+          "discharging": "Discharging",
+          "idle": "Idle"
+        }
+      },
+      "weakest_cell": {
+        "name": "Weakest cell"
+      },
+      "strongest_cell": {
+        "name": "Strongest cell"
+      }
+    },
+    "binary_sensor": {
+      "fault": {
+        "name": "Fault"
+      }
     }
   }
 }

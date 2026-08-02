@@ -48,9 +48,42 @@ the bank is only enumerated once frames start arriving.
 | Battery | Min / max cell voltage, Cell imbalance | |
 | Battery | Cells | count, diagnostic, disabled by default |
 | Cell | Voltage | the measurement everything else derives from |
+| Cluster | Fault | on when any battery is faulted; lists which |
+| Battery | Fault | on when this battery is faulted; lists which alarms |
+| Battery | *29 named alarms* | one per app alarm, diagnostic, disabled by default |
+| Battery | Relay 1–4 | matches the app's Relay tab, diagnostic, disabled by default |
 
 **Cell imbalance** is the one worth an automation — a cell drifting away from
 its pack is the earliest visible sign of a failing cell.
+
+## Alarms
+
+The BMS reports 29 named alarms, matching the vendor app's alarm page row for
+row. Each is a severity of 0-3, where the app renders 1/2/3 as "Level1/2/3
+Fault".
+
+Most people want the single **Fault** sensor per battery — it turns on for any
+alarm and its `active_alarms` attribute names what fired, which is enough for
+an automation and for a notification that says something useful. The 29
+individual sensors exist for when you want to trigger on one specific alarm;
+they are disabled by default, because 29 per battery would bury everything else
+in a bank that is normally entirely healthy.
+
+The bit layout was recovered from the vendor app's own parser rather than
+guessed from captures, and checked against a real fault — see
+[`docs/ble-protocol.md`](../../docs/ble-protocol.md) for the derivation.
+
+## Relays
+
+The BMS reports four relay routes, the same ones the app's Relay tab draws.
+They are **read-only**: the app's page builds no command message, so these are
+`binary_sensor`s rather than `switch`es — there is nothing to write back.
+Disabled by default, since they have not moved in any capture taken so far.
+
+Each carries the underlying 0–3 value as a `value` attribute. Only `1` is
+established as the active state (by matching a capture against the screenshot
+taken from it); `0` and `3` both draw unhighlighted in the app, so they are not
+distinguished.
 
 ## Why one connection per cluster
 

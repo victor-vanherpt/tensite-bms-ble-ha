@@ -22,6 +22,12 @@ CONF_MEMBER_SERIALS: Final = "member_serials"
 CONF_EXPECTED_BATTERIES: Final = "expected_batteries"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 
+#: When true, pack temperature sensors reporting a fault sentinel (-50 C or
+#: -30 C) report unavailable instead of the sentinel value. Off by default so
+#: the integration mirrors the vendor app, which displays the sentinel.
+CONF_HIDE_SENTINEL_TEMPERATURES: Final = "hide_sentinel_temperatures"
+DEFAULT_HIDE_SENTINEL_TEMPERATURES: Final = False
+
 #: The gateway accepts one BLE central at a time and each poll holds the
 #: connection for several seconds, so polling hard buys nothing and blocks
 #: anything else that wants the slot. Cell voltages drift slowly.
@@ -42,3 +48,8 @@ CONNECT_TIMEOUT: Final = 20.0
 PROBE_TIMEOUT: Final = 35.0
 
 DEFAULT_EXPECTED_BATTERIES: Final = 0  # 0 = wait out the listen timeout
+
+#: How many polling intervals may pass without data before entities are
+#: reported unavailable. A single missed poll is routine on BLE; several in a
+#: row is a real problem worth surfacing.
+STALE_AFTER_INTERVALS: Final = 3

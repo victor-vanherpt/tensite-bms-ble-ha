@@ -18,15 +18,17 @@ from homeassistant.components.bluetooth import (
 from homeassistant.components.bluetooth.active_update_coordinator import (
     ActiveBluetoothDataUpdateCoordinator,
 )
+from bluetooth_data_tools import monotonic_time_coarse
 from homeassistant.core import HomeAssistant
 from tensite_bms_ble import (
     ClusterReading,
     TensiteClusterClient,
     TensiteError,
     TensiteNoDataError,
+    merge_readings,
 )
 
-from .const import CONNECT_TIMEOUT, LISTEN_TIMEOUT
+from .const import CONNECT_TIMEOUT, LISTEN_TIMEOUT, STALE_AFTER_INTERVALS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class TensiteClusterCoordinator(
         serial: str | None,
         scan_interval: float,
         expected_batteries: int = 0,
+        hide_sentinel_temperatures: bool = False,
     ) -> None:
         super().__init__(
             hass=hass,
@@ -55,9 +58,34 @@ class TensiteClusterCoordinator(
         )
         self.serial = serial
         self.scan_interval = scan_interval
+        #: See CONF_HIDE_SENTINEL_TEMPERATURES.
+        self.hide_sentinel_temperatures = hide_sentinel_temperatures
         self._configured_expected = expected_batteries
         #: High-water mark of batteries seen, for diagnostics only.
         self._seen_batteries = 0
+        #: Monotonic time of the last poll that actually returned data.
+        self._last_data_at: float | None = None
+
+    @property
+    def has_fresh_data(self) -> bool:
+        """Whether a recent poll produced data.
+
+        Entities key their availability off this rather than off advertisement
+        freshness -- see the note in ``TensiteEntity``. The window is generous
+        because a single missed poll is routine on BLE; several consecutive
+        failures are what should actually surface as unavailable.
+        """
+        if self.data is None or self._last_data_at is None:
+            return False
+        age = monotonic_time_coarse() - self._last_data_at
+        return age <= self.scan_interval * STALE_AFTER_INTERVALS + LISTEN_TIMEOUT
+
+    @property
+    def data_age(self) -> float | None:
+        """Seconds since the last poll that returned data."""
+        if self._last_data_at is None:
+            return None
+        return monotonic_time_coarse() - self._last_data_at
 
     @property
     def cluster_name(self) -> str:
@@ -153,6 +181,13 @@ class TensiteClusterCoordinator(
             _LOGGER.warning("%s: poll failed: %s", self.address, err)
             return self.data
 
+        # Carry forward anything this poll did not observe. The gateway
+        # round-robins the bank, so a poll can return a battery's summary
+        # without its cells -- replacing wholesale would blank all 16 cell
+        # entities for that battery until a later poll happened to catch them.
+        reading = merge_readings(self.data, reading)
+
+        self._last_data_at = monotonic_time_coarse()
         self._seen_batteries = max(self._seen_batteries, reading.battery_count)
         if self.serial is None and reading.master_serial:
             self.serial = reading.master_serial

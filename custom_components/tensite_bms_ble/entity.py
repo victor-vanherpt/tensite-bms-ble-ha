@@ -58,14 +58,19 @@ def cluster_device_info(coordinator: TensiteClusterCoordinator) -> DeviceInfo:
 
 
 def battery_device_info(
-    coordinator: TensiteClusterCoordinator, serial: str, position_label: str
+    coordinator: TensiteClusterCoordinator,
+    serial: str,
+    position_label: str,
+    model: str | None = None,
 ) -> DeviceInfo:
     """Device entry for one battery, parented to its cluster."""
     return DeviceInfo(
         identifiers={(DOMAIN, serial)},
         name=f"Battery {position_label.split('/')[-1]} {serial[-5:]}",
         manufacturer=MANUFACTURER,
-        model=MODEL_BATTERY,
+        # The BMS reports its own model string (e.g. AB4850/100_2.0) in a
+        # type-0x24 frame, which does not always arrive in the first poll.
+        model=model or MODEL_BATTERY,
         serial_number=serial,
         via_device=(DOMAIN, cluster_device_id(coordinator.address)),
     )
@@ -90,13 +95,20 @@ class TensiteEntity(PassiveBluetoothCoordinatorEntity[TensiteClusterCoordinator]
     advertisements and expose ``available``, where ``CoordinatorEntity``
     expects a ``last_update_success`` flag that these coordinators do not have.
 
-    The inherited ``available`` reflects only whether the gateway is being seen.
-    Entities that render polled data additionally require a reading, since the
-    device can be advertising happily while no poll has yet succeeded.
+    Availability is deliberately *not* the inherited advertisement-freshness
+    check. Home Assistant suppresses repeat advertisements whose content has
+    not changed, and this gateway broadcasts constant manufacturer data -- so
+    in practice its advertisements only reach us about once every ten minutes,
+    and Home Assistant marks it unavailable in between. Tying entities to that
+    made every reading flap to unavailable for most of each interval despite
+    polls succeeding perfectly.
+
+    What matters for a mains-powered device we actively poll is whether a
+    recent poll produced data, so that is what is used.
     """
 
     _attr_has_entity_name = True
 
     @property
     def available(self) -> bool:
-        return self.coordinator.available and self.coordinator.data is not None
+        return self.coordinator.has_fresh_data

@@ -93,6 +93,9 @@ class TensiteClusterCoordinator(
         self.poll_delay = poll_delay
         #: See CONF_HIDE_SENTINEL_TEMPERATURES.
         self.hide_sentinel_temperatures = hide_sentinel_temperatures
+        #: Options as they were at setup. A reload is only worth doing when
+        #: these change -- see _async_update_listener.
+        self.options_snapshot: dict = {}
         self._configured_expected = expected_batteries
         #: What the last full-window poll counted. This is the auto-detected
         #: bank size: it is set only by polls that could not exit early, so it

@@ -62,6 +62,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
         ),
     )
     entry.runtime_data = coordinator
+    # What a later update is compared against; see _async_update_listener.
+    coordinator.options_snapshot = dict(entry.options)
 
     # Start the coordinator *before* forwarding platforms, so it is already
     # listening for advertisements by the time entities are created.
@@ -107,7 +109,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> 
 async def _async_update_listener(
     hass: HomeAssistant, entry: TensiteConfigEntry
 ) -> None:
-    """Reload when options change, so the new poll interval takes effect."""
+    """Reload when *options* change, so the new poll delay takes effect.
+
+    The guard matters. Home Assistant fires this listener for any update to the
+    entry, including the ones this integration makes itself: recording which
+    batteries a gateway reported writes entry.data, which fired this, which
+    reloaded the integration and threw away the reading that had just been
+    polled. The bank was then re-enumerated, membership recorded again, and so
+    on. Only an options change should cost a reload.
+    """
+    coordinator = entry.runtime_data
+    if entry.options == coordinator.options_snapshot:
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

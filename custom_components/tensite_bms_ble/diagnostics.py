@@ -79,9 +79,12 @@ async def async_get_config_entry_diagnostics(
             "truncated": reading.stats.truncated,
             "reject_ratio": round(reading.stats.reject_ratio, 4),
         },
+        # Keyed by position, not serial. async_redact_data replaces matching
+        # *values*, so a dict keyed by serial would hand the serials straight
+        # to anyone the file is sent to -- which is the one thing this is
+        # supposed to prevent.
         "batteries": {
-            serial: {
-                "position": battery.position_label,
+            battery.position_label: {
                 "is_master": battery.is_master,
                 "model": battery.model,
                 "has_summary": battery.summary is not None,
@@ -102,7 +105,7 @@ async def async_get_config_entry_diagnostics(
                 "relay_routes": list(battery.relay_routes),
                 "switch_routes": list(battery.switch_routes),
             }
-            for serial, battery in sorted(reading.batteries.items())
+            for _, battery in sorted(reading.batteries.items())
         },
     }
     return async_redact_data(data, TO_REDACT)

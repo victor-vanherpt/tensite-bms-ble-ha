@@ -29,79 +29,8 @@ from custom_components.tensite_bms_ble.const import (
     DOMAIN,
 )
 
-from .conftest import FakeServiceInfo
 
-ADDRESS = "AA:BB:CC:DD:EE:FF"
-MASTER = "1417725SLKOPGG08146"
-SLAVE = "1417607SLKOPGG08051"
-
-#: The captured fault: the app showed "Cell Faults -> Voltage Under: Fault".
-FAULTY_BITS = bytes.fromhex("0000300000000000")
-
-
-def full_reading() -> ClusterReading:
-    """A bank reporting everything a real poll can return."""
-    cells = tuple(range(3300, 3300 + 16))
-    return ClusterReading(
-        address=ADDRESS,
-        master_serial=MASTER,
-        batteries={
-            MASTER: BatteryReading(
-                serial=MASTER,
-                position=0x01A0,
-                cell_voltages_mv=cells,
-                temperatures=(25, 26, 27, 28, -30, 29),
-                alarm_bits=bytes(8),
-                relay_routes=(1, 0, 0, 0),
-                switch_routes=(3, 3, 3, 3),
-                model="AB4850/100_2.0",
-            ),
-            SLAVE: BatteryReading(
-                serial=SLAVE,
-                position=0x0103,
-                cell_voltages_mv=cells,
-                temperatures=(25, 26, 27, 28),
-                alarm_bits=FAULTY_BITS,
-                relay_routes=(1, 0, 0, 0),
-            ),
-        },
-    )
-
-
-@pytest.fixture
-async def entry(hass) -> MockConfigEntry:
-    """A set-up config entry that has completed one poll."""
-    config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        unique_id=ADDRESS,
-        data={CONF_ADDRESS: ADDRESS, CONF_SERIAL: MASTER},
-        options={},
-    )
-    config_entry.add_to_hass(hass)
-
-    client = AsyncMock()
-    client.async_read.return_value = full_reading()
-    with (
-        patch(
-            "custom_components.tensite_bms_ble.coordinator.TensiteClusterClient",
-            return_value=client,
-        ),
-        patch(
-            "custom_components.tensite_bms_ble.coordinator"
-            ".async_ble_device_from_address",
-            return_value=object(),
-        ),
-    ):
-        assert await hass.config_entries.async_setup(config_entry.entry_id)
-        await hass.async_block_till_done()
-
-        coordinator = config_entry.runtime_data
-        info = FakeServiceInfo(address=ADDRESS, device=object())
-        coordinator.data = await coordinator._async_poll_cluster(info)
-        coordinator.async_update_listeners()
-        await hass.async_block_till_done()
-
-    return config_entry
+from .conftest import ADDRESS, FAULTY_BITS, MASTER, SLAVE
 
 
 class TestSetup:

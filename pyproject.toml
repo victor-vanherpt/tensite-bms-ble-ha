@@ -28,6 +28,7 @@ dev = [
     "serialx",
     "pyserial",
     "aioesphomeapi",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.uv.sources]

@@ -22,7 +22,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Could not connect. The gateway accepts only one Bluetooth connection at a time, so check nothing else is talking to it \u2014 another script, an add-on, or the Tensite app.",
+      "cannot_connect": "Could not connect. The gateway accepts only one Bluetooth connection at a time, so check nothing else is talking to it — another script, an add-on, or the Tensite app.",
       "no_batteries": "Connected, but this battery reported no data. It may not be relaying for its cluster. Try the bank master instead."
     },
     "abort": {
@@ -41,9 +41,9 @@
           "hide_sentinel_temperatures": "Hide non-reporting temperature sensors"
         },
         "data_description": {
-          "scan_interval": "The gateway accepts only one Bluetooth connection at a time, and each poll holds it for several seconds. Cell voltages drift slowly, so polling often gains little.",
-          "expected_batteries": "How many batteries are in this cluster. Set it and each poll ends as soon as they have all reported, which is much quicker. Left at 0, every poll waits out the full listening window \u2014 slower, but it cannot miss a battery that reports late.",
-          "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 \u00b0C or -30 \u00b0C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected \u2014 a genuinely cold pack below freezing is still reported normally."
+          "scan_interval": "How often to poll, measured from the start of one poll to the next, minimum 30 seconds. This is a floor rather than a schedule: a poll can only begin when the gateway advertises, so the achieved interval may be longer. Check the Poll Interval diagnostic sensor for what is actually happening. A poll never starts while another is running.",
+          "expected_batteries": "How many batteries are in this cluster. Set it and each poll ends as soon as they have all reported, which is much quicker. Left at 0, every poll waits out the full listening window — slower, but it cannot miss a battery that reports late.",
+          "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 °C or -30 °C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected — a genuinely cold pack below freezing is still reported normally."
         }
       }
     }
@@ -126,11 +126,23 @@
       },
       "strongest_cell": {
         "name": "Strongest cell"
+      },
+      "active_alarms": {
+        "name": "Active Alarms"
+      },
+      "poll_interval": {
+        "name": "Poll Interval"
+      },
+      "poll_duration": {
+        "name": "Poll Duration"
+      },
+      "consecutive_failures": {
+        "name": "Consecutive Poll Failures"
       }
     },
     "binary_sensor": {
-      "fault": {
-        "name": "Fault"
+      "system_status": {
+        "name": "System Status"
       }
     }
   }

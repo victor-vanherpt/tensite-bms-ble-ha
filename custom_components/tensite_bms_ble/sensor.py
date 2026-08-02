@@ -51,6 +51,15 @@ MILLIVOLT = UnitOfElectricPotential.MILLIVOLT
 @dataclass(frozen=True, kw_only=True)
 class ClusterSensorDescription(SensorEntityDescription):
     value_fn: Callable[[ClusterReading], float | int | str | None]
+    #: Optional extra attributes, for sensors whose state is a summary and
+    #: whose detail belongs alongside it rather than in another entity.
+    attrs_fn: Callable[[ClusterReading], dict[str, object]] | None = None
+    #: For sensors that describe the *connection* rather than the battery data.
+    #: These read from the coordinator and stay available with no data at all,
+    #: which is the whole point -- they explain why data is missing.
+    coordinator_fn: (
+        Callable[["TensiteClusterCoordinator"], float | int | str | None] | None
+    ) = None
 
 
 CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
@@ -104,6 +113,7 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
     ),
     ClusterSensorDescription(
         key="min_temperature",
@@ -112,6 +122,7 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
     ),
     ClusterSensorDescription(
         key="status",
@@ -140,6 +151,39 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         suggested_display_precision=1,
     ),
+    # --- polling health -------------------------------------------------
+    # The interval is a floor, not a schedule: a poll can only begin when an
+    # advertisement arrives. So report what was actually achieved alongside
+    # what was asked for, which is the only way to tell "set to 60 s but the
+    # gateway only advertises every 300" from "polling is broken".
+    ClusterSensorDescription(
+        key="poll_interval",
+        translation_key="poll_interval",
+        value_fn=lambda r: None,
+        coordinator_fn=lambda c: c.last_poll_interval,
+        native_unit_of_measurement="s",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ClusterSensorDescription(
+        key="poll_duration",
+        translation_key="poll_duration",
+        value_fn=lambda r: None,
+        coordinator_fn=lambda c: c.last_poll_duration,
+        native_unit_of_measurement="s",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ClusterSensorDescription(
+        key="consecutive_failures",
+        translation_key="consecutive_failures",
+        value_fn=lambda r: None,
+        coordinator_fn=lambda c: c.consecutive_failures,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
     ClusterSensorDescription(
         key="rejected_frames",
         translation_key="rejected_frames",
@@ -154,6 +198,27 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ClusterSensorDescription(
+        key="active_alarms",
+        translation_key="active_alarms",
+        value_fn=lambda r: sum(len(b.active_alarms) for b in r.batteries.values()),
+        attrs_fn=lambda r: {
+            # Keyed by serial so the state says how many and this says where.
+            "by_battery": {
+                serial: [slot.name for slot, _ in battery.active_alarms]
+                for serial, battery in sorted(r.batteries.items())
+                if battery.active_alarms
+            },
+            "alarms": sorted(
+                {
+                    slot.name
+                    for battery in r.batteries.values()
+                    for slot, _ in battery.active_alarms
+                }
+            ),
+        },
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     ClusterSensorDescription(
         key="cell_sum_voltage",
@@ -198,6 +263,7 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
 @dataclass(frozen=True, kw_only=True)
 class BatterySensorDescription(SensorEntityDescription):
     value_fn: Callable[[BatteryReading], float | int | str | datetime | None]
+    attrs_fn: Callable[[BatteryReading], dict[str, object]] | None = None
 
 
 BATTERY_SENSORS: tuple[BatterySensorDescription, ...] = (
@@ -244,6 +310,7 @@ BATTERY_SENSORS: tuple[BatterySensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
     ),
     BatterySensorDescription(
         key="min_temperature",
@@ -252,6 +319,7 @@ BATTERY_SENSORS: tuple[BatterySensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
     ),
     BatterySensorDescription(
         key="cell_sum_voltage",
@@ -290,18 +358,49 @@ BATTERY_SENSORS: tuple[BatterySensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         suggested_display_precision=1,
     ),
+    # Deliberately no state_class on these two: they are cell *positions*
+    # (1-16), not measurements. With a state_class Home Assistant records
+    # long-term statistics and charts them, which produces a meaningless graph
+    # -- the mean of "cell 4" and "cell 11" is not a thing, and interpolating
+    # between them is worse. They identify a cell; treat them as labels.
+    # Tracks alarms firing without needing all 29 per-alarm entities enabled.
+    # The state is a count so it graphs and triggers cleanly (> 0 is "something
+    # is wrong", and the number rising says it got worse); which alarms are
+    # firing rides along in the attributes.
+    BatterySensorDescription(
+        key="active_alarms",
+        translation_key="active_alarms",
+        value_fn=lambda b: (
+            None if b.alarm_bits is None else len(b.active_alarms)
+        ),
+        attrs_fn=lambda b: {
+            "alarms": [slot.name for slot, _ in b.active_alarms],
+            "highest_level": (
+                int(b.alarm_level) if b.alarm_level is not None else None
+            ),
+            "detail": [
+                {
+                    "name": slot.name,
+                    "category": slot.category,
+                    "label": slot.label,
+                    "key": slot.key,
+                    "level": int(level),
+                }
+                for slot, level in b.active_alarms
+            ],
+        },
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
     BatterySensorDescription(
         key="weakest_cell",
         translation_key="weakest_cell",
         value_fn=lambda b: b.weakest_cell,
-        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BatterySensorDescription(
         key="strongest_cell",
         translation_key="strongest_cell",
         value_fn=lambda b: b.strongest_cell,
-        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),
@@ -442,10 +541,29 @@ class TensiteClusterSensor(TensiteEntity, SensorEntity):
         self._attr_device_info = cluster_device_info(coordinator)
 
     @property
+    def available(self) -> bool:
+        # Connection diagnostics must survive a total loss of data -- an
+        # unavailable "why is polling failing" sensor is useless.
+        if self.entity_description.coordinator_fn is not None:
+            return True
+        return super().available
+
+    @property
     def native_value(self) -> float | int | str | None:
+        if (coordinator_fn := self.entity_description.coordinator_fn) is not None:
+            return coordinator_fn(self.coordinator)
         if (reading := self.coordinator.data) is None:
             return None
         return self.entity_description.value_fn(reading)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        if self.entity_description.coordinator_fn is not None:
+            return self.coordinator.poll_health
+        attrs_fn = self.entity_description.attrs_fn
+        if attrs_fn is None or (reading := self.coordinator.data) is None:
+            return None
+        return attrs_fn(reading)
 
 
 class TensiteRssiSensor(TensiteEntity, SensorEntity):
@@ -514,6 +632,13 @@ class TensiteBatterySensor(TensiteEntity, SensorEntity):
         if (battery := self._battery) is None:
             return None
         return self.entity_description.value_fn(battery)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        attrs_fn = self.entity_description.attrs_fn
+        if attrs_fn is None or (battery := self._battery) is None:
+            return None
+        return attrs_fn(battery)
 
 
 class TensiteCellSensor(TensiteEntity, SensorEntity):
@@ -588,6 +713,13 @@ class TensitePackTemperatureSensor(TensiteEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_state_class = SensorStateClass.MEASUREMENT
+    # The BMS reports whole degrees, so anything past the decimal point is
+    # noise from Home Assistant's own time-weighted statistics mean rather than
+    # a real reading. Without this a *constant* sensor draws a spiky graph: the
+    # mean lands on -49.999999999999996 for one bucket, and because the series
+    # never varies the chart autoscales its y-axis to that 1e-13 range and
+    # renders the rounding error as a full-height spike.
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self, coordinator: TensiteClusterCoordinator, serial: str, index: int

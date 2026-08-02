@@ -8,13 +8,27 @@ That field packs 29 named alarms as 2-bit severities. The layout was read out
 of the vendor app's own parser rather than guessed from captures; see
 ``tensite_bms_ble.alarms`` for the derivation. Each battery therefore gets:
 
-* one "Fault" sensor, on when anything at all is wrong, listing what;
-* one sensor per named alarm, matching the app's own alarm page row for row.
+* one "Alarm ..." sensor per named alarm, matching the app's alarm page row
+  for row.
 
-The per-alarm entities are disabled by default. Twenty-nine of them per
-battery would swamp the UI for a bank that is almost always entirely healthy,
-and Home Assistant's guidance is to ship rarely-useful entities disabled and
-let people turn on the ones they care about.
+* one "System Status" sensor per battery and one for the bank, reading Ok or
+  Fault.
+
+System Status carries ``BinarySensorDeviceClass.PROBLEM``, which is what makes
+it join Home Assistant's problem groupings and alerting. That device class also
+defines the polarity -- ``on`` means a problem is detected, ``off`` means
+normal -- which is the conventional mapping and the reason inverting it would
+be wrong: anything consuming binary sensors generically reads ``on`` as the
+state worth acting on.
+
+A device class supplies its own state wording, so these render OK/Problem and
+custom state translations would be ignored.
+
+All of these are enabled by default so they take part in Home Assistant's
+problem groupings and can be triggered on directly. That is 29 alarms per
+battery, nearly all of which read OK indefinitely -- ``sensor.*_active_alarms``
+exists as the compact view over the same data, carrying a count as its state
+and the firing alarms as attributes.
 """
 
 from __future__ import annotations
@@ -45,7 +59,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the cluster fault sensor now, per-battery ones as they appear."""
     coordinator = entry.runtime_data
-    async_add_entities([TensiteClusterFault(coordinator)])
+    async_add_entities([TensiteClusterStatus(coordinator)])
 
     known: set[str] = set()
     #: Relay routes already given entities, per battery. Counted rather than
@@ -64,7 +78,7 @@ async def async_setup_entry(
         for serial in reading.batteries:
             if serial not in known:
                 known.add(serial)
-                entities.append(TensiteBatteryFault(coordinator, serial))
+                entities.append(TensiteBatteryStatus(coordinator, serial))
                 entities.extend(
                     TensiteBatteryAlarm(coordinator, serial, slot)
                     for slot in ALARM_SLOTS
@@ -85,110 +99,6 @@ async def async_setup_entry(
 
     entry.async_on_unload(coordinator.async_add_listener(_add_new_batteries))
     _add_new_batteries()
-
-
-class TensiteClusterFault(TensiteEntity, BinarySensorEntity):
-    """On when any battery in the bank reports a fault."""
-
-    _attr_translation_key = "fault"
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-
-    def __init__(self, coordinator: TensiteClusterCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.address}_fault"
-        self._attr_device_info = cluster_device_info(coordinator)
-
-    @property
-    def is_on(self) -> bool | None:
-        reading = self.coordinator.data
-        return reading.has_fault if reading else None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        reading = self.coordinator.data
-        if reading is None:
-            return {"faulted_batteries": []}
-        return {
-            "faulted_batteries": list(reading.faulted_batteries),
-            # Enough to see what is wrong with the bank without opening each
-            # battery, keyed by serial so it says *which* battery.
-            "active_alarms": {
-                serial: [slot.name for slot, _ in battery.active_alarms]
-                for serial, battery in sorted(reading.batteries.items())
-                if battery.active_alarms
-            },
-        }
-
-
-class TensiteBatteryFault(TensiteEntity, BinarySensorEntity):
-    """On when this battery reports a fault."""
-
-    _attr_translation_key = "fault"
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-
-    def __init__(
-        self, coordinator: TensiteClusterCoordinator, serial: str
-    ) -> None:
-        super().__init__(coordinator)
-        self._serial = serial
-        self._attr_unique_id = f"{serial}_fault"
-        reading = coordinator.data
-        battery = reading.batteries.get(serial) if reading else None
-        self._attr_device_info = battery_device_info(
-            coordinator,
-            serial,
-            battery.position_label if battery else "",
-            battery.model if battery else None,
-        )
-
-    @property
-    def _battery(self) -> BatteryReading | None:
-        reading = self.coordinator.data
-        return reading.batteries.get(self._serial) if reading else None
-
-    @property
-    def available(self) -> bool:
-        battery = self._battery
-        return (
-            self.coordinator.has_fresh_data
-            and battery is not None
-            and battery.has_fault is not None
-        )
-
-    @property
-    def is_on(self) -> bool | None:
-        battery = self._battery
-        return battery.has_fault if battery else None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        battery = self._battery
-        if battery is None:
-            return {}
-        firing = battery.active_alarms
-        return {
-            # What the app would be showing, in the app's own order.
-            "active_alarms": [slot.name for slot, _ in firing],
-            "active_alarms_detail": [
-                {
-                    "name": slot.name,
-                    "category": slot.category,
-                    "label": slot.label,
-                    "key": slot.key,
-                    "level": int(level),
-                }
-                for slot, level in firing
-            ],
-            "alarm_level": (
-                int(battery.alarm_level)
-                if battery.alarm_level is not None
-                else None
-            ),
-            # Kept for diagnosis: if a future firmware sets a bit outside the
-            # 29 the app parses, the mapping is incomplete and this shows it.
-            "alarm_bits": battery.alarm_bits_hex,
-            "unmapped_alarm_bits": battery.unmapped_alarm_bits or None,
-        }
 
 
 class TensiteRelayRoute(TensiteEntity, BinarySensorEntity):
@@ -251,9 +161,14 @@ class TensiteBatteryAlarm(TensiteEntity, BinarySensorEntity):
     """One named alarm from the app's alarm page, for one battery."""
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    # See the module docstring: 29 per battery is too many to enable blindly.
-    _attr_entity_registry_enabled_default = False
+    # Not EntityCategory.DIAGNOSTIC: that category is for technical detail that
+    # does not affect the primary function (signal strength, frame counters). A
+    # fault alarm is a primary signal, and diagnostic entities are filed away
+    # from the problem groupings these are meant to feed.
+    #
+    # Enabled by default so every alarm joins those groupings and can be
+    # triggered on without being switched on by hand. That is 29 per battery,
+    # nearly all reading OK forever; "Active Alarms" stays the compact view.
 
     def __init__(
         self,
@@ -264,7 +179,10 @@ class TensiteBatteryAlarm(TensiteEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self._serial = serial
         self._slot = slot
-        self._attr_name = slot.name
+        # Prefixed so all 29 sort and search together, and so an alarm is
+        # recognisable as one out of context -- "Temperature Over" on its own
+        # reads like a measurement.
+        self._attr_name = f"Alarm {slot.name}"
         self._attr_unique_id = f"{serial}_alarm_{slot.key}"
         reading = coordinator.data
         battery = reading.batteries.get(serial) if reading else None
@@ -309,4 +227,95 @@ class TensiteBatteryAlarm(TensiteEntity, BinarySensorEntity):
             # about what separates them, so the number is passed through.
             "level": int(level) if level is not None else None,
             "category": self._slot.category,
+        }
+
+
+class TensiteClusterStatus(TensiteEntity, BinarySensorEntity):
+    """Bank status: on when any battery reports a fault."""
+
+    _attr_translation_key = "system_status"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, coordinator: TensiteClusterCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address}_system_status"
+        self._attr_device_info = cluster_device_info(coordinator)
+
+    @property
+    def is_on(self) -> bool | None:
+        reading = self.coordinator.data
+        return reading.has_fault if reading else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        reading = self.coordinator.data
+        if reading is None:
+            return {"faulted_batteries": []}
+        return {
+            "faulted_batteries": list(reading.faulted_batteries),
+            # Which battery, without opening each one.
+            "active_alarms": {
+                serial: [slot.name for slot, _ in battery.active_alarms]
+                for serial, battery in sorted(reading.batteries.items())
+                if battery.active_alarms
+            },
+        }
+
+
+class TensiteBatteryStatus(TensiteEntity, BinarySensorEntity):
+    """Status for one battery. See the module docstring on the off/on mapping."""
+
+    _attr_translation_key = "system_status"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(
+        self, coordinator: TensiteClusterCoordinator, serial: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._serial = serial
+        self._attr_unique_id = f"{serial}_system_status"
+        reading = coordinator.data
+        battery = reading.batteries.get(serial) if reading else None
+        self._attr_device_info = battery_device_info(
+            coordinator,
+            serial,
+            battery.position_label if battery else "",
+            battery.model if battery else None,
+        )
+
+    @property
+    def _battery(self) -> BatteryReading | None:
+        reading = self.coordinator.data
+        return reading.batteries.get(self._serial) if reading else None
+
+    @property
+    def available(self) -> bool:
+        battery = self._battery
+        return (
+            self.coordinator.has_fresh_data
+            and battery is not None
+            and battery.has_fault is not None
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        battery = self._battery
+        return battery.has_fault if battery else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        battery = self._battery
+        if battery is None:
+            return {}
+        return {
+            "active_alarms": [slot.name for slot, _ in battery.active_alarms],
+            "alarm_level": (
+                int(battery.alarm_level)
+                if battery.alarm_level is not None
+                else None
+            ),
+            # If a future firmware sets a bit outside the 29 the vendor app
+            # parses, our table is incomplete and this is where it shows.
+            "alarm_bits": battery.alarm_bits_hex,
+            "unmapped_alarm_bits": battery.unmapped_alarm_bits or None,
         }

@@ -1,0 +1,108 @@
+"""Downloadable diagnostics.
+
+Settings -> Devices & Services -> Tensite BMS -> the three-dot menu ->
+"Download diagnostics".
+
+This is where the detail that would otherwise need a dozen entities lives:
+polling health, frame parse statistics, and what each battery last reported.
+The question it is meant to answer is "polling is not behaving as I expect --
+why?", so it deliberately includes the things that explain a *lack* of data
+rather than only the data itself.
+
+Serial numbers are redacted. They identify the hardware and appear in every
+frame, so a diagnostics file pasted into an issue would otherwise carry them.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.core import HomeAssistant
+
+from . import TensiteConfigEntry
+from .const import (
+    CONF_MEMBER_SERIALS,
+    CONF_SERIAL,
+    CONNECT_TIMEOUT,
+    LISTEN_TIMEOUT,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
+)
+
+TO_REDACT = {CONF_SERIAL, CONF_MEMBER_SERIALS, "serial", "master_serial"}
+
+
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: TensiteConfigEntry
+) -> dict[str, Any]:
+    """Return diagnostics for a cluster."""
+    coordinator = entry.runtime_data
+    reading = coordinator.data
+
+    data: dict[str, Any] = {
+        "config": {
+            "data": dict(entry.data),
+            "options": dict(entry.options),
+        },
+        "limits": {
+            "min_scan_interval_s": MIN_SCAN_INTERVAL,
+            "max_scan_interval_s": MAX_SCAN_INTERVAL,
+            "connect_timeout_s": CONNECT_TIMEOUT,
+            "listen_timeout_s": LISTEN_TIMEOUT,
+        },
+        "polling": coordinator.poll_health,
+        "connection": {
+            "address": coordinator.address,
+            "rssi": coordinator.rssi,
+            "has_fresh_data": coordinator.has_fresh_data,
+            "expected_batteries": coordinator.expected_batteries,
+        },
+    }
+
+    if reading is None:
+        data["reading"] = None
+        return async_redact_data(data, TO_REDACT)
+
+    data["reading"] = {
+        "master_serial": reading.master_serial,
+        "battery_count": reading.battery_count,
+        "updated_at": reading.updated_at.isoformat(),
+        # A climbing reject ratio means frames are arriving but failing CRC or
+        # unstuffing, which looks identical to "not polling" from the outside.
+        "frames": {
+            "accepted": reading.stats.frames,
+            "rejected": reading.stats.rejected,
+            "crc_failures": reading.stats.crc_failures,
+            "length_mismatches": reading.stats.length_mismatches,
+            "bad_escapes": reading.stats.bad_escapes,
+            "truncated": reading.stats.truncated,
+            "reject_ratio": round(reading.stats.reject_ratio, 4),
+        },
+        "batteries": {
+            serial: {
+                "position": battery.position_label,
+                "is_master": battery.is_master,
+                "model": battery.model,
+                "has_summary": battery.summary is not None,
+                "cell_count": battery.cell_count,
+                # Cells can lag the rest of a reading badly; this is how far.
+                "cells_age_s": (
+                    None
+                    if battery.cells_age is None
+                    else round(battery.cells_age, 1)
+                ),
+                "temperature_count": len(battery.temperatures),
+                "alarm_bits": battery.alarm_bits_hex,
+                "active_alarms": [
+                    {"name": slot.name, "level": int(level)}
+                    for slot, level in battery.active_alarms
+                ],
+                "unmapped_alarm_bits": battery.unmapped_alarm_bits or None,
+                "relay_routes": list(battery.relay_routes),
+                "switch_routes": list(battery.switch_routes),
+            }
+            for serial, battery in sorted(reading.batteries.items())
+        },
+    }
+    return async_redact_data(data, TO_REDACT)

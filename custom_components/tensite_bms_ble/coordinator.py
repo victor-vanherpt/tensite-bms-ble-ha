@@ -28,7 +28,12 @@ from tensite_bms_ble import (
     merge_readings,
 )
 
-from .const import CONNECT_TIMEOUT, LISTEN_TIMEOUT, STALE_AFTER_INTERVALS
+from .const import (
+    CONNECT_TIMEOUT,
+    LISTEN_TIMEOUT,
+    POLL_GRACE_FRACTION,
+    STALE_AFTER_INTERVALS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +70,29 @@ class TensiteClusterCoordinator(
         self._seen_batteries = 0
         #: Monotonic time of the last poll that actually returned data.
         self._last_data_at: float | None = None
+        #: Monotonic time the last poll *began*. See _needs_poll().
+        self._last_poll_started: float | None = None
+        #: Set for the duration of a poll. Home Assistant's debouncer already
+        #: refuses to run two polls at once, but without this a poll that runs
+        #: longer than the interval leaves _needs_poll saying "due" while it is
+        #: still going, and the debouncer fires the queued one the instant it
+        #: returns -- back-to-back connections that never let go of the
+        #: gateway's single slot.
+        self._poll_in_progress = False
+
+        # --- diagnostics ---
+        self._polls = 0
+        self._poll_failures = 0
+        self._polls_skipped_overlap = 0
+        self._consecutive_failures = 0
+        #: Wall time of the most recent poll, in seconds.
+        self._last_poll_duration: float | None = None
+        #: Gap between the last two poll starts. The honest answer to "is it
+        #: actually polling every N seconds?", since the interval is a floor
+        #: and advertisements decide when a poll may happen.
+        self._last_poll_interval: float | None = None
+        #: Why the last failure happened, for the diagnostics download.
+        self._last_error: str | None = None
 
     @property
     def has_fresh_data(self) -> bool:
@@ -86,6 +114,67 @@ class TensiteClusterCoordinator(
         if self._last_data_at is None:
             return None
         return monotonic_time_coarse() - self._last_data_at
+
+    @property
+    def _due_after(self) -> float:
+        """Seconds after a poll start before the next advertisement is taken.
+
+        Slightly less than the interval; see POLL_GRACE_FRACTION.
+        """
+        return self.scan_interval * (1.0 - POLL_GRACE_FRACTION)
+
+    @property
+    def poll_health(self) -> dict[str, object]:
+        """Everything needed to answer "is polling working, and if not why?".
+
+        The interval is a floor, not a schedule: a poll can only start when an
+        advertisement arrives, so the achieved interval is what actually
+        matters and is reported separately from the configured one.
+        """
+        return {
+            "configured_interval_s": self.scan_interval,
+            "due_after_s": round(self._due_after, 1),
+            "achieved_interval_s": (
+                None
+                if self._last_poll_interval is None
+                else round(self._last_poll_interval, 1)
+            ),
+            "last_duration_s": (
+                None
+                if self._last_poll_duration is None
+                else round(self._last_poll_duration, 1)
+            ),
+            "polls": self._polls,
+            "failures": self._poll_failures,
+            "consecutive_failures": self._consecutive_failures,
+            "skipped_still_polling": self._polls_skipped_overlap,
+            "last_error": self._last_error,
+            "seconds_since_data": (
+                None if self.data_age is None else round(self.data_age, 1)
+            ),
+            "poll_in_progress": self._poll_in_progress,
+            "batteries_seen": self._seen_batteries,
+        }
+
+    @property
+    def last_poll_duration(self) -> float | None:
+        """Wall time of the most recent poll, in seconds."""
+        return self._last_poll_duration
+
+    @property
+    def last_poll_interval(self) -> float | None:
+        """Seconds between the last two poll starts, as achieved."""
+        return self._last_poll_interval
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Failed polls since the last one that returned data."""
+        return self._consecutive_failures
+
+    @property
+    def polls_skipped_overlap(self) -> int:
+        """Advertisements ignored because a poll was still running."""
+        return self._polls_skipped_overlap
 
     @property
     def cluster_name(self) -> str:
@@ -116,10 +205,15 @@ class TensiteClusterCoordinator(
     def _needs_poll(
         self, service_info: BluetoothServiceInfoBleak, last_poll: float | None
     ) -> bool:
-        """Poll on the first advertisement, then no more often than the interval.
+        """Poll on the first advertisement, then once per interval.
 
-        *last_poll* is seconds elapsed since the previous poll attempt, or None
-        if none has happened yet.
+        Timed from when the previous poll *started*, not from when it finished.
+        The base class's *last_poll* measures the latter, and that quietly
+        halves the polling rate: this gateway advertises on a fixed cadence, so
+        if the interval is set to match it, the seconds a poll spends holding
+        the connection push the next advertisement just under the threshold.
+        It gets skipped, and the effective interval becomes two advertisements
+        rather than one -- 10 minutes for a 5-minute setting.
         """
         # Deliberately not gated on hass.is_running. Config entries are set up
         # while Home Assistant is still CoreState.not_running, so that guard
@@ -127,20 +221,58 @@ class TensiteClusterCoordinator(
         # to registered callbacks rarely enough that the next chance can be
         # minutes away. The base class already refuses to poll while stopping,
         # which is the case that actually matters.
-        due = last_poll is None or last_poll >= self.scan_interval
+        if self._poll_in_progress:
+            self._polls_skipped_overlap += 1
+            _LOGGER.debug(
+                "%s: advertisement ignored, a poll is still running",
+                self.address,
+            )
+            return False
+
+        since_start = (
+            None
+            if self._last_poll_started is None
+            else monotonic_time_coarse() - self._last_poll_started
+        )
+        due = since_start is None or since_start >= self._due_after
         _LOGGER.debug(
             "%s: advertisement (rssi=%s connectable=%s) -> poll=%s "
-            "(last_poll=%s interval=%ss)",
+            "(last_poll=%s due_after=%.0fs interval=%ss)",
             self.address,
             service_info.rssi,
             service_info.connectable,
             due,
-            "never" if last_poll is None else f"{last_poll:.0f}s ago",
+            "never" if since_start is None else f"{since_start:.0f}s ago",
+            self._due_after,
             self.scan_interval,
         )
         return due
 
     async def _async_poll_cluster(
+        self, service_info: BluetoothServiceInfoBleak
+    ) -> ClusterReading | None:
+        """Time one poll, record how it went, and never leave the guard set."""
+        started = monotonic_time_coarse()
+        if self._last_poll_started is not None:
+            self._last_poll_interval = started - self._last_poll_started
+        self._last_poll_started = started
+        self._poll_in_progress = True
+        self._polls += 1
+        try:
+            return await self._async_read_cluster(service_info)
+        except Exception as err:  # noqa: BLE001 -- recorded, then re-raised
+            self._note_failure(f"{type(err).__name__}: {err}")
+            raise
+        finally:
+            self._last_poll_duration = monotonic_time_coarse() - started
+            self._poll_in_progress = False
+
+    def _note_failure(self, reason: str) -> None:
+        self._poll_failures += 1
+        self._consecutive_failures += 1
+        self._last_error = reason
+
+    async def _async_read_cluster(
         self, service_info: BluetoothServiceInfoBleak
     ) -> ClusterReading | None:
         """Connect, read the whole bank, disconnect.
@@ -157,6 +289,7 @@ class TensiteClusterCoordinator(
                 self.hass, service_info.address, connectable=True
             )
         if ble_device is None:
+            self._note_failure("no connectable device available")
             _LOGGER.debug(
                 "%s: no connectable device available, keeping last reading",
                 self.address,
@@ -175,9 +308,11 @@ class TensiteClusterCoordinator(
         except TensiteNoDataError as err:
             # Connected but the bank stayed quiet. Transient often enough that
             # dropping the last known reading would flap every entity.
+            self._note_failure(f"no data: {err}")
             _LOGGER.debug("%s: %s", self.address, err)
             return self.data
         except TensiteError as err:
+            self._note_failure(str(err))
             _LOGGER.warning("%s: poll failed: %s", self.address, err)
             return self.data
 
@@ -188,6 +323,7 @@ class TensiteClusterCoordinator(
         reading = merge_readings(self.data, reading)
 
         self._last_data_at = monotonic_time_coarse()
+        self._consecutive_failures = 0
         self._seen_batteries = max(self._seen_batteries, reading.battery_count)
         if self.serial is None and reading.master_serial:
             self.serial = reading.master_serial

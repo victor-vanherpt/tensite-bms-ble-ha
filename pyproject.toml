@@ -1,0 +1,41 @@
+[project]
+name = "tensite-bms-ble-ha"
+version = "0.2.2"
+description = "Home Assistant integration for Tensite / UhomeEnergy BMS battery clusters over BLE"
+requires-python = ">=3.14.2"
+
+[dependency-groups]
+dev = [
+    # Pinned to the Home Assistant release this runs against, so the test
+    # harness exercises the same coordinator and entity base classes the
+    # integration actually inherits from in production.
+    "homeassistant==2026.7.4",
+    "pytest-homeassistant-custom-component",
+    "tensite-bms-ble",
+    # Runtime requirements of the Home Assistant bluetooth component and
+    # the platforms it pulls in. pytest-homeassistant-custom-component
+    # ships the core only, so anything a component imports at module level
+    # has to be listed here or collection fails on import.
+    "aiousbwatcher",
+    "habluetooth",
+    "bluetooth-adapters",
+    "bluetooth-auto-recovery",
+    "bluetooth-data-tools",
+    "bleak",
+    "bleak-retry-connector",
+    "dbus-fast",
+    "usb-devices",
+    "serialx",
+    "pyserial",
+    "aioesphomeapi",
+]
+
+[tool.uv.sources]
+tensite-bms-ble = { path = "../tensite-bms-ble", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# The integration is imported as custom_components.tensite_bms_ble, the same
+# path Home Assistant uses, so the repo root has to be importable.
+pythonpath = ["."]

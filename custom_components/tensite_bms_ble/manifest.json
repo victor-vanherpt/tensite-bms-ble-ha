@@ -1,14 +1,14 @@
 {
   "domain": "tensite_bms_ble",
   "name": "Tensite BMS (BLE)",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "codeowners": ["@victor-vanherpt"],
   "config_flow": true,
   "dependencies": ["bluetooth_adapters"],
   "documentation": "https://github.com/victor-vanherpt/tensite-bms-ble-ha",
   "issue_tracker": "https://github.com/victor-vanherpt/tensite-bms-ble-ha/issues",
   "iot_class": "local_polling",
-  "requirements": ["tensite-bms-ble==0.5.0"],
+  "requirements": ["tensite-bms-ble==0.6.0"],
   "bluetooth": [
     {
       "manufacturer_id": 58626,

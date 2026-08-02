@@ -81,6 +81,13 @@ async def async_get_config_entry_diagnostics(
             "bad_escapes": reading.stats.bad_escapes,
             "truncated": reading.stats.truncated,
             "reject_ratio": round(reading.stats.reject_ratio, 4),
+            # Message ids the device sends that nothing here decodes. Not
+            # an error -- the vendor app ignores some of these too -- but a
+            # firmware that starts sending something new shows up here.
+            "unhandled_ids": {
+                f"0x{msg_id:04x}": count
+                for msg_id, count in sorted(reading.stats.unhandled.items())
+            },
         },
         # Keyed by position, not serial. async_redact_data replaces matching
         # *values*, so a dict keyed by serial would hand the serials straight

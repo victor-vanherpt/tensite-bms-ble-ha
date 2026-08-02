@@ -47,7 +47,12 @@ from tensite_bms_ble import (
     merge_readings,
 )
 
-from .const import CONNECT_TIMEOUT, LISTEN_TIMEOUT, STALE_AFTER_INTERVALS
+from .const import (
+    CONNECT_TIMEOUT,
+    LISTEN_TIMEOUT,
+    MIN_STALE_WINDOW,
+    STALE_AFTER_INTERVALS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -150,7 +155,15 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
         if self.data is None or self._last_data_at is None:
             return False
         age = monotonic_time_coarse() - self._last_data_at
-        return age <= self.scan_interval * STALE_AFTER_INTERVALS + LISTEN_TIMEOUT
+        return age <= self.stale_after
+
+    @property
+    def stale_after(self) -> float:
+        """Seconds without data before entities report unavailable."""
+        return (
+            max(self.scan_interval * STALE_AFTER_INTERVALS, MIN_STALE_WINDOW)
+            + LISTEN_TIMEOUT
+        )
 
     @property
     def available(self) -> bool:
@@ -168,6 +181,7 @@ class TensiteClusterCoordinator(DataUpdateCoordinator[ClusterReading | None]):
         """Everything needed to answer "is polling working, and if not why?"."""
         return {
             "configured_interval_s": self.scan_interval,
+            "stale_after_s": round(self.stale_after, 1),
             "achieved_interval_s": (
                 None
                 if self._last_poll_interval is None

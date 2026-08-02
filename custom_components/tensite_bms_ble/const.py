@@ -28,10 +28,14 @@ CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_HIDE_SENTINEL_TEMPERATURES: Final = "hide_sentinel_temperatures"
 DEFAULT_HIDE_SENTINEL_TEMPERATURES: Final = False
 
-#: The gateway accepts one BLE central at a time and each poll holds the
-#: connection for several seconds, so polling hard buys nothing and blocks
-#: anything else that wants the slot. Cell voltages drift slowly.
-DEFAULT_SCAN_INTERVAL: Final = 300  # seconds
+#: A minute is about where the useful resolution runs out: a pack drifts a few
+#: millivolts over that, so sampling faster mostly records noise. It also keeps
+#: the gateway busy only ~10% of the time, which leaves its single connection
+#: slot free for the vendor app.
+#:
+#: Lower is allowed down to MIN_SCAN_INTERVAL, which is what you want when
+#: watching something happen rather than logging it.
+DEFAULT_SCAN_INTERVAL: Final = 60  # seconds
 MAX_SCAN_INTERVAL: Final = 3600
 
 #: Floor on the polling interval.
@@ -69,3 +73,11 @@ DEFAULT_EXPECTED_BATTERIES: Final = 0  # 0 = wait out the listen timeout
 #: reported unavailable. A single missed poll is routine on BLE; several in a
 #: row is a real problem worth surfacing.
 STALE_AFTER_INTERVALS: Final = 3
+
+#: ...but never sooner than this, however short the interval. Scaling purely
+#: with the interval means a fast poller declares itself dead absurdly quickly:
+#: at the 10 s floor, three missed polls is half a minute, and a BLE device can
+#: easily be unreachable that long while being perfectly healthy. The data is
+#: no more stale at a short interval than a long one -- only the sampling rate
+#: changed -- so the window has a floor of its own.
+MIN_STALE_WINDOW: Final = 300.0  # seconds

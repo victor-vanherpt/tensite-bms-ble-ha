@@ -7,20 +7,26 @@ battery would have them competing for the one connection slot.
 
 **Advertisement-driven, and it has to be.** Polling on a timer was tried, to
 escape the fact that this gateway only reaches Home Assistant's callbacks every
-245-300 seconds and a poll can therefore only start that often. It works for
-exactly three polls. From the fourth onward every connection fails with "the
-proxy/adapter is out of connection slots" while the adapter is idle, BlueZ
-reports no connected devices, and the device is advertising a second earlier --
-and it never recovers until Home Assistant restarts. Something in the path
-leaks a connection slot per poll when the poll is not driven by an
-advertisement. Reaping stale connections first, resolving the device from the
-last advertisement rather than by address, and keeping the Bluetooth callback
-registered were all tried; none of them helped.
+245-300 seconds and a poll can therefore only start that often. It fails: after
+a few polls every connection raises "the proxy/adapter is out of connection
+slots", and it never recovers until Home Assistant restarts.
 
-Driven from advertisements it is completely stable -- tens of consecutive polls
-with no failures. So the poll delay is a *floor*, and the real ceiling is the
-gateway's advertising cadence: setting anything below roughly 280 seconds means
-"poll on every advertisement", which is as fast as this hardware allows.
+That error is a red herring, and it was measured rather than guessed. With
+habluetooth at INFO the adapter reports ``slots=5/5 free`` on every attempt
+including the failing ones, and bleak_retry_connector never logs the
+``No slots available`` rejection that real exhaustion produces. What actually
+stops is the ``Found N connection path(s)`` line: once it disappears,
+``async_scanner_devices_by_address(address, connectable=True)`` is returning
+nothing, so no connection path exists at all and the code falls through to an
+error that blames slots. Signal strength is not the discriminator either --
+attempts logged at RSSI=-127 succeeded.
+
+In short a connection can only be established while Home Assistant is holding a
+live connectable scanner-device entry for the address, and that exists around
+advertisements. Polling on their arrival is therefore not a workaround but the
+only correct design, and the gateway's advertising cadence is a hard ceiling:
+the poll delay is a *floor*, and setting it below roughly 280 seconds just
+means "poll on every advertisement", which is as fast as this hardware allows.
 """
 
 from __future__ import annotations

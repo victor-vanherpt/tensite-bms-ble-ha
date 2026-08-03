@@ -8,6 +8,7 @@ from pathlib import Path
 
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
@@ -77,14 +78,20 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     separately is how you end up with a card expecting a sensor that the
     installed integration does not have.
 
-    ``add_extra_js_url`` is the supported route for a custom integration to get
-    a module loaded -- it is what its own docstring describes it for. The card
-    is then available on every dashboard without a resource entry.
+    Registered as a Lovelace *resource* rather than through
+    ``frontend.add_extra_js_url``. Both get the module to the browser, but only
+    one gets it there in time: extra JS urls are injected as a bare
+    ``import()`` that nothing waits for, while the Lovelace panel loads its
+    resources and waits for them before it builds any cards. With the former, a
+    dashboard can create a card before its element is defined, and Home
+    Assistant does not re-render it when the definition arrives -- it just says
+    "Custom element doesn't exist".
 
-    The frontend is an *after* dependency, not a hard one: a Home Assistant
-    with no dashboard at all is a real configuration, and it should still get
-    its sensors. So the file is always served and only the automatic loading
-    is skipped when there is nothing to load it into.
+    YAML-mode Lovelace has no writable resource collection, so that falls back
+    to the extra JS url. And the frontend is an *after* dependency, not a hard
+    one: a Home Assistant with no dashboard at all is a real configuration and
+    should still get its sensors, so the file is always served and only the
+    loading is skipped when there is nothing to load it into.
     """
     if hass.data.get(CARD_REGISTERED):
         return
@@ -103,11 +110,32 @@ async def _async_register_card(hass: HomeAssistant) -> None:
             )
         ]
     )
+
+    url = f"{CARD_URL}?v={integration.version}"
+    lovelace = hass.data.get(LOVELACE_DATA)
+    if lovelace is not None and lovelace.resource_mode == "storage":
+        resources = lovelace.resources
+        # The collection is loaded lazily; async_get_info is what forces it.
+        await resources.async_get_info()
+        existing = next(
+            (r for r in resources.async_items() if r["url"].startswith(CARD_URL)),
+            None,
+        )
+        if existing is None:
+            await resources.async_create_item({"res_type": "module", "url": url})
+            _LOGGER.info("Registered the cell grid card as a Lovelace resource")
+        elif existing["url"] != url:
+            # Carries the integration version, so an upgrade rewrites it and
+            # browsers fetch the new card instead of the cached old one.
+            await resources.async_update_item(existing["id"], {"url": url})
+            _LOGGER.debug("Updated the card resource to %s", url)
+        return
+
     if "frontend" not in hass.config.components:
         _LOGGER.debug("Serving %s; no frontend to load it into", CARD_URL)
         return
-    frontend.add_extra_js_url(hass, f"{CARD_URL}?v={integration.version}")
-    _LOGGER.debug("Registered %s (integration %s)", CARD_URL, integration.version)
+    frontend.add_extra_js_url(hass, url)
+    _LOGGER.debug("Loading %s via extra_module_url", url)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> bool:

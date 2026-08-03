@@ -181,26 +181,29 @@ def _async_record_membership(
 def _async_remove_retired_entities(
     hass: HomeAssistant, entry: TensiteConfigEntry
 ) -> None:
-    """Delete entities for diagnostics that no longer exist.
+    """Delete entities that nothing writes to any more.
 
-    Poll interval, poll duration and consecutive poll failures described a
-    connect-read-disconnect cycle that is gone. Nothing will ever write to them
-    again, so left alone they would sit in the registry as permanently
-    unavailable entities and in dashboards as empty cards.
+    Poll interval, duration and consecutive failures described a
+    connect-read-disconnect cycle that is gone; "cell voltages updated" was a
+    timestamp that changed every few seconds and filled the logbook. Left
+    alone they would sit in the registry as permanently unavailable entities
+    and in dashboards as empty cards.
+
+    Matched on the unique_id *suffix* rather than built from the address,
+    because these are not all cluster-level -- the cells one is per battery and
+    so carries a serial.
     """
     ent_reg = er.async_get(hass)
-    address = entry.data[CONF_ADDRESS]
-    removed = []
-    for key in RETIRED_SENSOR_KEYS:
-        entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{address}_{key}")
-        if entity_id is not None:
-            ent_reg.async_remove(entity_id)
-            removed.append(entity_id)
+    removed = [
+        entity.entity_id
+        for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+        if any(entity.unique_id.endswith(f"_{key}") for key in RETIRED_SENSOR_KEYS)
+    ]
+    for entity_id in removed:
+        ent_reg.async_remove(entity_id)
     if removed:
         _LOGGER.info(
-            "Removed %d retired polling entities: %s",
-            len(removed),
-            ", ".join(removed),
+            "Removed %d retired entities: %s", len(removed), ", ".join(removed)
         )
 
 

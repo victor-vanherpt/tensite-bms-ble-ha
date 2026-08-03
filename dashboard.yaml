@@ -29,6 +29,7 @@ views:
       - sensor.sala_solar_ts_l5000_8146_state_of_charge
       - sensor.sala_solar_ts_l5000_8146_status
       - sensor.sala_solar_ts_l5000_8146_voltage
+      - switch.sala_solar_ts_l5000_8146_connection
   - type: grid
     cards:
     - type: entities
@@ -37,11 +38,11 @@ views:
       - sensor.cluster_08146_signal_strength
       - sensor.sala_solar_ts_l5000_8146_batteries_expected
       - sensor.sala_solar_ts_l5000_8146_batteries_reported
-      - sensor.sala_solar_ts_l5000_8146_consecutive_poll_failures
+      - sensor.sala_solar_ts_l5000_8146_connection_failures
       - sensor.sala_solar_ts_l5000_8146_frame_reject_rate
-      - sensor.sala_solar_ts_l5000_8146_poll_duration
-      - sensor.sala_solar_ts_l5000_8146_poll_interval
+      - sensor.sala_solar_ts_l5000_8146_reconnects
       - sensor.sala_solar_ts_l5000_8146_rejected_frames
+      - sensor.sala_solar_ts_l5000_8146_time_between_updates
 - title: Battery PA0 08146
   path: battery-pa0-08146
   type: sections
@@ -151,7 +152,7 @@ views:
     - type: entities
       title: Diagnostics
       entities:
-      - sensor.battery_pa0_08146_cell_voltages_updated
+      - sensor.battery_pa0_08146_cell_data_age
 - title: Battery P01 08099
   path: battery-p01-08099
   type: sections
@@ -261,7 +262,7 @@ views:
     - type: entities
       title: Diagnostics
       entities:
-      - sensor.battery_p01_08099_cell_voltages_updated
+      - sensor.battery_p01_08099_cell_data_age
 - title: Battery P02 08313
   path: battery-p02-08313
   type: sections
@@ -369,7 +370,7 @@ views:
     - type: entities
       title: Diagnostics
       entities:
-      - sensor.battery_p02_08313_cell_voltages_updated
+      - sensor.battery_p02_08313_cell_data_age
 - title: Battery P03 08051
   path: battery-p03-08051
   type: sections
@@ -477,4 +478,4 @@ views:
     - type: entities
       title: Diagnostics
       entities:
-      - sensor.battery_p03_08051_cell_voltages_updated
+      - sensor.battery_p03_08051_cell_data_age

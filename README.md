@@ -80,6 +80,29 @@ one every 5 s — the measured cell cadence, so nothing is dropped and nothing i
 re-reported. *Time between updates* shows what is actually achieved; on live
 hardware it reads 5.1 s, the gateway's own rate.
 
+### The Activity feed
+
+Home Assistant's logbook shows a sensor unless it counts as *continuous* — one
+with a unit, a state class, or a numeric device class. On a held connection
+every reading is rewritten every few seconds, so a sensor missing all three
+writes a logbook line at that rate.
+
+*Cell data age* is a measurement in seconds for exactly this reason; it was a
+timestamp, and at ~585 changes an hour per battery it buried everything else in
+Activity. Binary sensors are never filtered, which is why alarms and system
+status still appear there — that is the intent.
+
+Two sensors report a cell *position* rather than a measurement, so they cannot
+honestly be made continuous and still show up. If their changes bother you:
+
+```yaml
+logbook:
+  exclude:
+    entity_globs:
+      - sensor.*_weakest_cell
+      - sensor.*_strongest_cell
+```
+
 ### Recorder volume
 
 Readings every 5 s instead of every 5 minutes is a lot more history. Measured on

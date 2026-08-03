@@ -23,6 +23,7 @@ from homeassistant.const import (
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
+    UnitOfTime,
     UnitOfPower,
     UnitOfTemperature,
 )
@@ -406,11 +407,21 @@ BATTERY_SENSORS: tuple[BatterySensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),
+    # An age in seconds rather than the timestamp this used to be. Same
+    # question -- have this battery's cells gone quiet while the others keep
+    # reporting? -- but a timestamp sensor is *not continuous* to Home
+    # Assistant, so every one of its ~585 changes an hour became a "Cell
+    # voltages updated" line in the logbook. Four batteries made that 2340
+    # entries an hour, burying the switch toggles and alarm changes the logbook
+    # is for. A measurement with a unit is filtered out of it, and answers the
+    # question more directly besides.
     BatterySensorDescription(
-        key="cells_updated_at",
-        translation_key="cells_updated_at",
-        value_fn=lambda b: b.cells_updated_at,
-        device_class=SensorDeviceClass.TIMESTAMP,
+        key="cells_age",
+        translation_key="cells_age",
+        value_fn=lambda b: None if b.cells_age is None else round(b.cells_age),
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BatterySensorDescription(

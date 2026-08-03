@@ -129,6 +129,61 @@ class TestSensorDescriptions:
             assert description.coordinator_fn is not None
 
 
+class TestLogbookNoise:
+    """What lands in the Activity feed.
+
+    Home Assistant shows a sensor in the logbook unless it counts as
+    *continuous*, which means a unit, a state class, or a numeric device class
+    (see `logbook.helpers.is_sensor_continuous`). Binary sensors are never
+    filtered, which is why alarms belong there and do appear.
+
+    On a held connection every reading is rewritten every few seconds, so a
+    sensor that misses all three of those writes a logbook line every few
+    seconds. "Cell voltages updated" did exactly that: ~585 changes an hour per
+    battery, 2340 across the bank, burying the switch toggles and alarm changes
+    the logbook exists for.
+    """
+
+    #: device classes Home Assistant does not treat as numeric.
+    NON_NUMERIC = {"date", "enum", "timestamp"}
+
+    def continuous(self, description) -> bool:
+        device_class = description.device_class
+        return bool(
+            description.native_unit_of_measurement
+            or description.state_class
+            or (device_class is not None and str(device_class) not in self.NON_NUMERIC)
+        )
+
+    def test_no_new_sensor_quietly_starts_filling_the_logbook(self):
+        """Deliberately an exact set, not a "nothing new" rule.
+
+        Both survivors change rarely enough to be worth reading: charging state
+        flips a few times a day, and the weakest/strongest cell only moves when
+        the pack's balance does. Adding a third should be a decision, not an
+        accident -- if this fails, either give the sensor a unit or state class,
+        or add it here having checked how often it actually changes.
+        """
+        noisy = {
+            f"{level}/{d.key}"
+            for level, group in (("cluster", CLUSTER_SENSORS), ("battery", BATTERY_SENSORS))
+            for d in group
+            if not self.continuous(d)
+        }
+        assert noisy == {
+            "cluster/status",
+            "battery/status",
+            "battery/weakest_cell",
+            "battery/strongest_cell",
+        }
+
+    def test_cell_freshness_is_a_measurement_not_a_timestamp(self):
+        """The one that had to change: it updated on every batch of frames."""
+        description = next(d for d in BATTERY_SENSORS if d.key == "cells_age")
+        assert self.continuous(description)
+        assert not any(d.key == "cells_updated_at" for d in BATTERY_SENSORS)
+
+
 class TestAlarmsAndRelays:
     """The reverse-engineered tables, seen through the entity layer."""
 

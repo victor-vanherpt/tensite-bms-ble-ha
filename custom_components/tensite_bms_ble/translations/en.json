@@ -84,9 +84,6 @@
       "rssi": {
         "name": "Signal strength"
       },
-      "cells_updated_at": {
-        "name": "Cell voltages updated"
-      },
       "rejected_frames": {
         "name": "Rejected frames"
       },
@@ -130,6 +127,9 @@
       },
       "connection_failures": {
         "name": "Connection failures"
+      },
+      "cells_age": {
+        "name": "Cell data age"
       }
     },
     "binary_sensor": {

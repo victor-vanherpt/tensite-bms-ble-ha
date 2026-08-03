@@ -63,9 +63,21 @@ OBSOLETE_OPTIONS: Final = frozenset(
     {"expected_batteries", "auto_battery_count", "scan_interval"}
 )
 
-#: Entity keys retired along with polling, removed from the registry on setup
-#: so they do not linger as permanently unavailable entities.
-RETIRED_SENSOR_KEYS: Final = ("poll_interval", "poll_duration", "consecutive_failures")
+#: Entity keys nothing writes to any more, removed from the registry on setup
+#: so they do not linger as permanently unavailable entities. Matched on the
+#: unique_id suffix, so both cluster- and battery-level keys work.
+#:
+#: The first three went with polling. ``cells_updated_at`` was a timestamp, and
+#: Home Assistant treats a sensor without a unit, state class or numeric device
+#: class as *not continuous* -- so each of its ~585 changes an hour became a
+#: logbook line. It is replaced by ``cells_age``, which measures the same thing
+#: in seconds and is filtered out of the logbook like every other measurement.
+RETIRED_SENSOR_KEYS: Final = (
+    "poll_interval",
+    "poll_duration",
+    "consecutive_failures",
+    "cells_updated_at",
+)
 
 #: How long without frames before entities report unavailable.
 #:

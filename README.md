@@ -278,13 +278,14 @@ about.
 
 ### Install
 
-```bash
-task deploy-card                      # copies www/tensite-cell-grid.js to /config/www
-```
+Nothing to install. The card ships inside the integration, which serves it at
+`/tensite_bms_ble/tensite-cell-grid.js` and loads it into the frontend itself,
+so there is no file to copy into `/config/www` and no Lovelace resource to add.
+The two are versioned together, which is the point: a card that expects a
+sensor added last week cannot end up installed beside an integration that does
+not have it.
 
-Then **Settings -> Dashboards -> three-dot menu -> Resources -> Add**, URL
-`/local/tensite-cell-grid.js?v=1`, type *JavaScript module*. Bump the number
-in `?v=` whenever you redeploy the card, or browsers keep serving the old copy.
+Just add it to a dashboard:
 
 ```yaml
 type: custom:tensite-cell-grid

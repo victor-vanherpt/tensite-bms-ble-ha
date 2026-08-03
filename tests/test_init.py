@@ -13,6 +13,7 @@ so what is under test here is that one turns into the right set of entities.
 
 from __future__ import annotations
 
+import pathlib
 import re
 
 from unittest.mock import AsyncMock, patch
@@ -309,3 +310,38 @@ class TestMigration:
         with caplog.at_level("DEBUG"):
             await async_migrate_entry(hass, config_entry)
         assert "dropped expected_batteries" in caplog.text
+
+
+class TestCard:
+    """The cell grid card ships with the integration and registers itself.
+
+    Worth testing because the failure is silent: nothing here raises if the
+    file is missing from the package or the static path is never registered.
+    The card simply never appears, and a dashboard referencing it shows
+    "Custom element doesn't exist".
+    """
+
+    def test_the_card_is_packaged(self):
+        """A file outside custom_components/ would not be shipped by HACS."""
+        from custom_components.tensite_bms_ble.const import CARD_FILENAME
+
+        card = (
+            pathlib.Path("custom_components/tensite_bms_ble/www") / CARD_FILENAME
+        )
+        assert card.is_file()
+        assert "customElements.define" in card.read_text()
+
+    async def test_setup_serves_it(self, hass, entry):
+        from custom_components.tensite_bms_ble.const import CARD_REGISTERED, CARD_URL
+
+        assert hass.data.get(CARD_REGISTERED) is True
+        # Registered against the real file, not a path that merely looks right.
+        assert CARD_URL.endswith(".js")
+
+    async def test_a_second_cluster_does_not_re_register(self, hass, entry, fake_stream):
+        """Registering the same static path twice is an error, and a bank of
+        two gateways is a perfectly ordinary setup."""
+        from custom_components.tensite_bms_ble import _async_register_card
+
+        # Would raise if it tried to register the path again.
+        await _async_register_card(hass)

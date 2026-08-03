@@ -372,11 +372,15 @@ class TensiteCellGrid extends HTMLElement {
   }
 }
 
-customElements.define("tensite-cell-grid", TensiteCellGrid);
-
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "tensite-cell-grid",
-  name: "Tensite cell grid",
-  description: "Per-cell voltages for one battery, shaded by balance.",
-});
+// Guarded: the integration serves this itself now, but an installation that
+// still has the old /local/tensite-cell-grid.js resource would load it twice,
+// and a second customElements.define throws and takes the dashboard with it.
+if (!customElements.get("tensite-cell-grid")) {
+  customElements.define("tensite-cell-grid", TensiteCellGrid);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "tensite-cell-grid",
+    name: "Tensite cell grid",
+    description: "Per-cell voltages for one battery, shaded by balance.",
+  });
+}

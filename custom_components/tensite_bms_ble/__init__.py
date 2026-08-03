@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
+from homeassistant.components import frontend
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.loader import async_get_integration
 
 from .const import (
+    CARD_FILENAME,
+    CARD_REGISTERED,
+    CARD_URL,
     CONF_ADDRESS,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
@@ -61,10 +68,54 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Serve the cell grid card and load it into the dashboard.
+
+    Shipped with the integration rather than copied into ``/config/www`` and
+    added as a Lovelace resource by hand. The card reads entities this
+    integration creates, so the two belong on the same version: installing them
+    separately is how you end up with a card expecting a sensor that the
+    installed integration does not have.
+
+    ``add_extra_js_url`` is the supported route for a custom integration to get
+    a module loaded -- it is what its own docstring describes it for. The card
+    is then available on every dashboard without a resource entry.
+
+    The frontend is an *after* dependency, not a hard one: a Home Assistant
+    with no dashboard at all is a real configuration, and it should still get
+    its sensors. So the file is always served and only the automatic loading
+    is skipped when there is nothing to load it into.
+    """
+    if hass.data.get(CARD_REGISTERED):
+        return
+    hass.data[CARD_REGISTERED] = True
+
+    integration = await async_get_integration(hass, DOMAIN)
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                CARD_URL,
+                str(Path(__file__).parent / "www" / CARD_FILENAME),
+                # Revalidate rather than cache hard: the ?v= below busts the
+                # cache on a version bump, but a card edited without one would
+                # otherwise keep serving the old copy with no way to tell.
+                cache_headers=False,
+            )
+        ]
+    )
+    if "frontend" not in hass.config.components:
+        _LOGGER.debug("Serving %s; no frontend to load it into", CARD_URL)
+        return
+    frontend.add_extra_js_url(hass, f"{CARD_URL}?v={integration.version}")
+    _LOGGER.debug("Registered %s (integration %s)", CARD_URL, integration.version)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> bool:
     """Set up one battery cluster from a config entry."""
     address: str = entry.data[CONF_ADDRESS]
     serial: str | None = entry.data.get(CONF_SERIAL)
+
+    await _async_register_card(hass)
 
     coordinator = TensiteClusterCoordinator(
         hass=hass,

@@ -135,27 +135,36 @@ class TestStaleness:
 class TestBatteryCount:
     """How the bank size is established.
 
-    The trap: an ordinary poll stops as soon as *expected* batteries have
-    reported, so counting its results only re-measures the exit condition, and
-    an undercount would latch permanently. Only a full-window poll may set it.
+    There is nothing to configure. The master states it in its topology frame;
+    a full-window poll is only the fallback for before one has arrived. The
+    trap the fallback avoids: an ordinary poll stops as soon as *expected*
+    batteries have reported, so counting its results would just re-measure the
+    exit condition, and an undercount would latch permanently.
     """
 
     def test_unknown_until_something_reports(self, hass):
         assert make_coordinator(hass).expected_batteries == 0
+        assert make_coordinator(hass).battery_count_source == "unknown"
 
-    def test_configured_value_wins_when_detection_is_off(self, hass):
-        coordinator = make_coordinator(
-            hass, expected_batteries=4, auto_battery_count=False
-        )
-        coordinator._learned_batteries = 2
+    def test_the_roster_is_used_when_present(self, hass):
+        coordinator = make_coordinator(hass)
+        coordinator._roster_batteries = 4
         assert coordinator.expected_batteries == 4
-        assert coordinator.battery_count_is_forced is True
+        assert coordinator.battery_count_source == "roster"
 
-    def test_learned_value_used_when_not_configured(self, hass):
+    def test_the_roster_beats_a_full_scan(self, hass):
+        """It is a statement by the bank, not a count of who happened to reply."""
+        coordinator = make_coordinator(hass)
+        coordinator._learned_batteries = 3
+        coordinator._roster_batteries = 4
+        assert coordinator.expected_batteries == 4
+        assert coordinator.battery_count_source == "roster"
+
+    def test_full_scan_is_the_fallback(self, hass):
         coordinator = make_coordinator(hass)
         coordinator._learned_batteries = 4
         assert coordinator.expected_batteries == 4
-        assert coordinator.battery_count_is_forced is False
+        assert coordinator.battery_count_source == "full scan"
 
     def test_full_scan_due_before_any_has_run(self, hass):
         """So the bank size is established on the very first poll."""
@@ -194,47 +203,3 @@ class TestConstants:
         assert 0 < POLL_GRACE_FRACTION <= 0.25
 
 
-class TestBatteryCountSource:
-    """Where the expected count comes from, in priority order.
-
-    The master's topology frame states the bank size outright, so when one
-    arrives there is nothing to infer -- it beats counting who answered.
-    """
-
-    def test_roster_beats_a_full_scan(self, hass):
-        coordinator = make_coordinator(hass)
-        coordinator._learned_batteries = 3
-        coordinator._roster_batteries = 4
-        assert coordinator.expected_batteries == 4
-        assert coordinator.battery_count_source == "roster"
-
-    def test_the_roster_wins_while_detection_is_on(self, hass):
-        """A stale typed value must not override what the bank now says."""
-        coordinator = make_coordinator(hass, expected_batteries=2)
-        coordinator._roster_batteries = 4
-        assert coordinator.expected_batteries == 4
-        assert coordinator.battery_count_source == "roster"
-
-    def test_turning_detection_off_hands_control_back(self, hass):
-        coordinator = make_coordinator(
-            hass, expected_batteries=2, auto_battery_count=False
-        )
-        coordinator._roster_batteries = 4
-        assert coordinator.expected_batteries == 2
-        assert coordinator.battery_count_source == "configured"
-        assert coordinator.battery_count_is_forced is True
-
-    def test_detection_off_still_falls_back_when_nothing_is_typed(self, hass):
-        """Better than waiting out the window on every poll."""
-        coordinator = make_coordinator(hass, auto_battery_count=False)
-        coordinator._roster_batteries = 4
-        assert coordinator.expected_batteries == 4
-
-    def test_full_scan_is_the_fallback_when_no_roster_arrives(self, hass):
-        coordinator = make_coordinator(hass)
-        coordinator._learned_batteries = 4
-        assert coordinator.expected_batteries == 4
-        assert coordinator.battery_count_source == "full scan"
-
-    def test_unknown_until_something_says_otherwise(self, hass):
-        assert make_coordinator(hass).battery_count_source == "unknown"

@@ -34,19 +34,14 @@ from tensite_bms_ble import (
 
 from .const import (
     CONF_ADDRESS,
-    CONF_AUTO_BATTERY_COUNT,
-    CONF_EXPECTED_BATTERIES,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONNECT_TIMEOUT,
-    DEFAULT_AUTO_BATTERY_COUNT,
-    DEFAULT_EXPECTED_BATTERIES,
     DEFAULT_HIDE_SENTINEL_TEMPERATURES,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    MAX_EXPECTED_BATTERIES,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
     PROBE_TIMEOUT,
@@ -72,7 +67,7 @@ def _title(serial: str | None, address: str) -> str:
 class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for a Tensite battery cluster."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         self._discovered: dict[str, str | None] = {}
@@ -231,11 +226,8 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_SERIAL: self._serial,
                 CONF_MEMBER_SERIALS: self._members,
             },
-            # 0 = detect the bank size. The coordinator prefers the
-            # master's own roster and falls back to an hourly full-window
-            # poll, so there is nothing to answer up front; the option exists
-            # only to override that.
-            options={CONF_EXPECTED_BATTERIES: DEFAULT_EXPECTED_BATTERIES},
+            # Nothing to configure: the bank states its own size.
+            options={},
         )
 
     @staticmethod
@@ -259,7 +251,6 @@ class TensiteOptionsFlow(OptionsFlow):
             )
 
         options = self.config_entry.options
-        configured = options.get(CONF_EXPECTED_BATTERIES) or None
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -290,33 +281,6 @@ class TensiteOptionsFlow(OptionsFlow):
                             DEFAULT_HIDE_SENTINEL_TEMPERATURES,
                         ),
                     ): cv.boolean,
-                    # Detection is a checkbox of its own. Home Assistant
-                    # option forms are static, so it cannot grey out the number
-                    # below; while it is on that number is ignored and kept in
-                    # step with what the bank reports.
-                    vol.Optional(
-                        CONF_AUTO_BATTERY_COUNT,
-                        default=options.get(
-                            CONF_AUTO_BATTERY_COUNT, DEFAULT_AUTO_BATTERY_COUNT
-                        ),
-                    ): cv.boolean,
-                    vol.Optional(
-                        CONF_EXPECTED_BATTERIES,
-                        description={"suggested_value": configured},
-                    ): vol.Any(
-                        None,
-                        vol.All(
-                            selector.NumberSelector(
-                                selector.NumberSelectorConfig(
-                                    min=1,
-                                    max=MAX_EXPECTED_BATTERIES,
-                                    step=1,
-                                    mode=selector.NumberSelectorMode.BOX,
-                                )
-                            ),
-                            vol.Coerce(int),
-                        ),
-                    ),
                 }
             ),
         )

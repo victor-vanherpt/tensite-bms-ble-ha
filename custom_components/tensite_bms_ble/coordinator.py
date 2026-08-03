@@ -77,9 +77,7 @@ class TensiteClusterCoordinator(
         address: str,
         serial: str | None,
         poll_delay: float,
-        expected_batteries: int = 0,
         hide_sentinel_temperatures: bool = False,
-        auto_battery_count: bool = True,
     ) -> None:
         super().__init__(
             hass=hass,
@@ -97,9 +95,6 @@ class TensiteClusterCoordinator(
         #: Options as they were at setup. A reload is only worth doing when
         #: these change -- see _async_update_listener.
         self.options_snapshot: dict = {}
-        #: See CONF_AUTO_BATTERY_COUNT.
-        self.auto_battery_count = auto_battery_count
-        self._configured_expected = expected_batteries
         #: What the last full-window poll counted. This is the auto-detected
         #: bank size: it is set only by polls that could not exit early, so it
         #: cannot latch onto an undercount, and it drops if a battery is
@@ -247,9 +242,7 @@ class TensiteClusterCoordinator(
             "poll_in_progress": self._poll_in_progress,
             "batteries_expected": self.expected_batteries,
             "batteries_reported": self._reported_batteries,
-            "battery_count_forced": self.battery_count_is_forced,
-            "battery_count_auto": self.auto_battery_count,
-            "batteries_detected": self.detected_batteries or None,
+            "battery_count_source": self.battery_count_source,
             "battery_count_source": self.battery_count_source,
             "roster_batteries": self._roster_batteries or None,
             "seconds_since_full_scan": (
@@ -307,49 +300,27 @@ class TensiteClusterCoordinator(
     def expected_batteries(self) -> int:
         """How many batteries a poll waits for before returning early.
 
-        In order of preference:
-
-        1. the configured override, when set;
-        2. the bank roster, when the master has sent a type-0x32 topology
-           frame -- this is the gateway's own count, so it is authoritative
-           and needs no inference at all;
-        3. what the last full-window poll counted.
+        Whatever the bank says it holds, and nothing else. The master states
+        this outright in its topology frame, so there is nothing to configure
+        and nothing to infer; a full-window poll is only the fallback for when
+        no topology frame has arrived yet.
 
         0 means "not known yet", which makes a poll wait out the listening
         window rather than exit early.
-
-        The third source exists because it is the only one available if the
-        topology frame never arrives, and it is deliberately fed only by
-        full-window polls: an ordinary poll stops as soon as *expected*
-        batteries have reported, so counting its results would just re-measure
-        the exit condition, and any undercount would latch permanently. See
-        FULL_SCAN_INTERVAL.
         """
-        if self.auto_battery_count:
-            return self.detected_batteries or self._configured_expected
-        return self._configured_expected or self.detected_batteries
+        return self.detected_batteries
 
     @property
     def detected_batteries(self) -> int:
         """What the bank says it holds, 0 if it has not said yet.
 
-        The roster is the master's own statement and wins; the full-window
-        count is the fallback for when no topology frame arrives.
+        The roster is the master's own statement and wins. The full-window
+        count is the fallback, and is deliberately fed only by polls that could
+        not exit early: an ordinary poll stops as soon as *expected* batteries
+        have reported, so counting its results would just re-measure the exit
+        condition, and any undercount would latch permanently.
         """
         return self._roster_batteries or self._learned_batteries
-
-    @property
-    def battery_count_source(self) -> str:
-        """Where expected_batteries came from, for diagnostics."""
-        if not self.auto_battery_count and self._configured_expected:
-            return "configured"
-        if self._roster_batteries:
-            return "roster"
-        if self._learned_batteries:
-            return "full scan"
-        if self._configured_expected:
-            return "configured"
-        return "unknown"
 
     @property
     def batteries_expected(self) -> int:
@@ -357,14 +328,22 @@ class TensiteClusterCoordinator(
         return self.expected_batteries
 
     @property
+    def battery_count_source(self) -> str:
+        """Where the expected count came from, for diagnostics.
+
+        Worth reporting: a surprising count should be traceable to whether the
+        bank stated it or a poll counted it.
+        """
+        if self._roster_batteries:
+            return "roster"
+        if self._learned_batteries:
+            return "full scan"
+        return "unknown"
+
+    @property
     def batteries_reported(self) -> int:
         """How many batteries answered the most recent poll."""
         return self._reported_batteries
-
-    @property
-    def battery_count_is_forced(self) -> bool:
-        """Whether the expected count comes from configuration, not detection."""
-        return not self.auto_battery_count and bool(self._configured_expected)
 
     @property
     def seconds_since_full_scan(self) -> float | None:

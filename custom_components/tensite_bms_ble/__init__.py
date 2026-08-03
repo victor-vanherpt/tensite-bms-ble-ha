@@ -12,14 +12,11 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .const import (
     CONF_ADDRESS,
-    CONF_AUTO_BATTERY_COUNT,
-    CONF_EXPECTED_BATTERIES,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
+    OBSOLETE_OPTIONS,
     CONF_SCAN_INTERVAL,
     CONF_SERIAL,
-    DEFAULT_AUTO_BATTERY_COUNT,
-    DEFAULT_EXPECTED_BATTERIES,
     DEFAULT_HIDE_SENTINEL_TEMPERATURES,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -33,28 +30,43 @@ PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 type TensiteConfigEntry = ConfigEntry[TensiteClusterCoordinator]
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Strip options that no longer exist.
+
+    Version 1 could store a battery count and a detect-automatically flag. The
+    bank master states its own size, so an override could only ever disagree
+    with an authoritative answer -- it is gone, and leaving the keys behind
+    would just be litter that a later reader has to work out the meaning of.
+    """
+    if entry.version >= 2:
+        return True
+
+    # Work out what is going before replacing the options, not after: reading
+    # entry.options afterwards reports what survived, so the message would
+    # always say nothing was dropped.
+    dropped = sorted(set(entry.options) & OBSOLETE_OPTIONS)
+    options = {k: v for k, v in entry.options.items() if k not in OBSOLETE_OPTIONS}
+    hass.config_entries.async_update_entry(entry, options=options, version=2)
+    _LOGGER.debug(
+        "%s: migrated to version 2, dropped %s",
+        entry.data.get(CONF_ADDRESS),
+        ", ".join(dropped) or "nothing",
+    )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> bool:
     """Set up one battery cluster from a config entry."""
     address: str = entry.data[CONF_ADDRESS]
     serial: str | None = entry.data.get(CONF_SERIAL)
-
-    # No adoption of a count from previously seen members here. That predates
-    # the roster: the master states the bank size outright, so writing a
-    # remembered count into the options would only override the authoritative
-    # answer with a stale guess.
-    expected = entry.options.get(CONF_EXPECTED_BATTERIES, DEFAULT_EXPECTED_BATTERIES)
 
     coordinator = TensiteClusterCoordinator(
         hass=hass,
         address=address,
         serial=serial,
         poll_delay=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-        expected_batteries=expected,
         hide_sentinel_temperatures=entry.options.get(
             CONF_HIDE_SENTINEL_TEMPERATURES, DEFAULT_HIDE_SENTINEL_TEMPERATURES
-        ),
-        auto_battery_count=entry.options.get(
-            CONF_AUTO_BATTERY_COUNT, DEFAULT_AUTO_BATTERY_COUNT
         ),
     )
     entry.runtime_data = coordinator
@@ -74,11 +86,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
     entry.async_on_unload(
         coordinator.async_add_listener(
             lambda: _async_record_membership(hass, entry, coordinator)
-        )
-    )
-    entry.async_on_unload(
-        coordinator.async_add_listener(
-            lambda: _async_sync_battery_count(hass, entry, coordinator)
         )
     )
 
@@ -155,42 +162,6 @@ def _async_record_membership(
 
     if changed:
         hass.config_entries.async_update_entry(entry, data=data)
-
-
-@callback
-def _async_sync_battery_count(
-    hass: HomeAssistant,
-    entry: TensiteConfigEntry,
-    coordinator: TensiteClusterCoordinator,
-) -> None:
-    """Write the detected bank size into the option, while detection is on.
-
-    Home Assistant option forms are static, so the checkbox cannot grey the
-    number field out. Keeping the field in step with what the bank reports is
-    the next best thing: it always shows what the integration is actually
-    using, and switching detection off leaves a sensible starting value rather
-    than a stale one.
-
-    The snapshot is updated *before* the entry, because updating an entry fires
-    the update listener, and that listener reloads whenever the options differ
-    from the snapshot. Writing one without the other would reload the
-    integration on the first poll and throw the reading away -- which is
-    exactly the loop that _async_update_listener exists to prevent.
-    """
-    if not coordinator.auto_battery_count:
-        return
-    detected = coordinator.detected_batteries
-    if not detected or entry.options.get(CONF_EXPECTED_BATTERIES) == detected:
-        return
-
-    options = {**entry.options, CONF_EXPECTED_BATTERIES: detected}
-    coordinator.options_snapshot = dict(options)
-    hass.config_entries.async_update_entry(entry, options=options)
-    _LOGGER.debug(
-        "%s: detected %d batteries, recorded in options",
-        entry.data[CONF_ADDRESS],
-        detected,
-    )
 
 
 _CELL_UNIQUE_ID = re.compile(r"^(?P<serial>.+)_cell_\d+_voltage$")

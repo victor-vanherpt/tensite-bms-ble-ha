@@ -19,7 +19,6 @@ CONF_SERIAL: Final = "serial"
 #: what lets sibling discovery flows be recognised as the same physical cluster
 #: rather than offered as three more clusters to add.
 CONF_MEMBER_SERIALS: Final = "member_serials"
-CONF_EXPECTED_BATTERIES: Final = "expected_batteries"
 #: Storage key only. The setting is a *delay* between polls, not a period,
 #: and is labelled that way in the UI -- but the key stays as-is so existing
 #: configurations keep their value.
@@ -74,25 +73,12 @@ PROBE_TIMEOUT: Final = 35.0
 
 #: 0 means "work it out", which is the normal case. A non-zero value forces
 #: the count and is only needed when the automatic answer is wrong.
-#: Whether the bank size is detected rather than typed. On by default: the
-#: master states it outright in its topology frame, so a typed value is only
-#: needed to override that.
-#:
-#: Home Assistant option forms are static -- a checkbox cannot grey out another
-#: field -- so the count field stays editable while this is on. It is simply
-#: ignored, and overwritten with whatever the bank reports, which is what makes
-#: the field readable as "what the integration currently thinks".
-CONF_AUTO_BATTERY_COUNT: Final = "auto_battery_count"
-DEFAULT_AUTO_BATTERY_COUNT: Final = True
+#: Removed in version 2. The bank master states its own size, so an override
+#: could only ever disagree with an authoritative answer. Kept as a name so
+#: the migration can strip it from options stored by version 1.
+OBSOLETE_OPTIONS: Final = frozenset({"expected_batteries", "auto_battery_count"})
 
-#: Largest bank the hardware supports, per the product documentation.
-#: Bounds the override so a typo cannot make every poll wait out the full
-#: listening window for batteries that cannot exist.
-MAX_EXPECTED_BATTERIES: Final = 8
-
-DEFAULT_EXPECTED_BATTERIES: Final = 0
-
-#: How often to run a poll that ignores the expected count and waits out the
+#: How often to run a poll that ignores the detected count and waits out the
 #: full listening window.
 #:
 #: This is what makes auto-detection safe. Learning the count from ordinary

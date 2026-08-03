@@ -160,65 +160,80 @@ class TestStates:
         assert hass.states.get(entity_id).state == "2"
 
 
-class TestBatteryCountWriteBack:
-    """Detection keeps the option field in step with what the bank reports.
+class TestMigration:
+    """Version 1 could store a battery count; version 2 has no such option.
 
-    Home Assistant option forms are static, so the checkbox cannot grey the
-    number field out. Writing the detected value into it is what makes the
-    field readable as "what the integration is actually using", and leaves a
-    sensible starting point if detection is later switched off.
+    Worth testing because it rewrites stored user configuration: getting it
+    wrong either leaves litter behind or takes something it should not.
     """
 
-    def sync(self, hass, entry):
-        from custom_components.tensite_bms_ble import _async_sync_battery_count
+    async def test_drops_the_obsolete_options(self, hass):
+        from custom_components.tensite_bms_ble import async_migrate_entry
 
-        _async_sync_battery_count(hass, entry, entry.runtime_data)
+        config_entry = MockConfigEntry(
+            domain=DOMAIN,
+            version=1,
+            data={CONF_ADDRESS: ADDRESS},
+            options={
+                "expected_batteries": 4,
+                "auto_battery_count": True,
+                "scan_interval": 120,
+            },
+        )
+        config_entry.add_to_hass(hass)
 
-    async def test_detected_count_is_written_into_the_options(self, hass, entry):
-        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+        assert await async_migrate_entry(hass, config_entry)
+        assert config_entry.version == 2
+        assert dict(config_entry.options) == {"scan_interval": 120}
 
-        coordinator = entry.runtime_data
-        coordinator._roster_batteries = 4
-        self.sync(hass, entry)
-        await hass.async_block_till_done()
-        assert entry.options[CONF_EXPECTED_BATTERIES] == 4
+    async def test_keeps_options_that_still_exist(self, hass):
+        from custom_components.tensite_bms_ble import async_migrate_entry
 
-    async def test_writing_it_does_not_trigger_a_reload(self, hass, entry):
-        """The snapshot must be updated with the entry, not after it.
+        config_entry = MockConfigEntry(
+            domain=DOMAIN,
+            version=1,
+            data={CONF_ADDRESS: ADDRESS},
+            options={"scan_interval": 300, "hide_sentinel_temperatures": True},
+        )
+        config_entry.add_to_hass(hass)
 
-        The update listener reloads whenever options differ from the snapshot.
-        Writing one without the other would reload on the first poll and throw
-        the reading away -- the loop that listener exists to prevent.
-        """
-        coordinator = entry.runtime_data
-        coordinator._roster_batteries = 4
-        self.sync(hass, entry)
-        await hass.async_block_till_done()
-        assert coordinator.options_snapshot == dict(entry.options)
+        assert await async_migrate_entry(hass, config_entry)
+        assert dict(config_entry.options) == {
+            "scan_interval": 300,
+            "hide_sentinel_temperatures": True,
+        }
 
-    async def test_setup_alone_records_what_the_poll_found(self, hass, entry):
-        """The fixture polls a two-battery bank, so the option should say two."""
-        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+    async def test_an_already_migrated_entry_is_left_alone(self, hass):
+        from custom_components.tensite_bms_ble import async_migrate_entry
 
-        assert entry.options[CONF_EXPECTED_BATTERIES] == 2
+        config_entry = MockConfigEntry(
+            domain=DOMAIN, version=2, data={CONF_ADDRESS: ADDRESS}, options={}
+        )
+        config_entry.add_to_hass(hass)
+        assert await async_migrate_entry(hass, config_entry)
+        assert config_entry.version == 2
 
-    async def test_nothing_is_written_while_detection_is_off(self, hass, entry):
-        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+    async def test_an_entry_with_nothing_to_drop_still_migrates(self, hass):
+        from custom_components.tensite_bms_ble import async_migrate_entry
 
-        coordinator = entry.runtime_data
-        coordinator.auto_battery_count = False
-        coordinator._roster_batteries = 4
-        self.sync(hass, entry)
-        await hass.async_block_till_done()
-        # Left at what setup found, not raised to the roster value.
-        assert entry.options[CONF_EXPECTED_BATTERIES] == 2
+        config_entry = MockConfigEntry(
+            domain=DOMAIN, version=1, data={CONF_ADDRESS: ADDRESS}, options={}
+        )
+        config_entry.add_to_hass(hass)
+        assert await async_migrate_entry(hass, config_entry)
+        assert config_entry.version == 2
 
-    async def test_nothing_is_written_before_the_bank_reports(self, hass, entry):
-        from custom_components.tensite_bms_ble.const import CONF_EXPECTED_BATTERIES
+    async def test_reports_what_it_actually_dropped(self, hass, caplog):
+        """Reading entry.options after the update reports what survived."""
+        from custom_components.tensite_bms_ble import async_migrate_entry
 
-        coordinator = entry.runtime_data
-        coordinator._roster_batteries = 0
-        coordinator._learned_batteries = 0
-        self.sync(hass, entry)
-        await hass.async_block_till_done()
-        assert entry.options[CONF_EXPECTED_BATTERIES] == 2
+        config_entry = MockConfigEntry(
+            domain=DOMAIN,
+            version=1,
+            data={CONF_ADDRESS: ADDRESS},
+            options={"expected_batteries": 4},
+        )
+        config_entry.add_to_hass(hass)
+        with caplog.at_level("DEBUG"):
+            await async_migrate_entry(hass, config_entry)
+        assert "dropped expected_batteries" in caplog.text

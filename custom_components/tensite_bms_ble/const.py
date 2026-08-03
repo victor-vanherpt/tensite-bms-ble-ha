@@ -19,49 +19,28 @@ CONF_SERIAL: Final = "serial"
 #: what lets sibling discovery flows be recognised as the same physical cluster
 #: rather than offered as three more clusters to add.
 CONF_MEMBER_SERIALS: Final = "member_serials"
-#: Storage key only. The setting is a *delay* between polls, not a period,
-#: and is labelled that way in the UI -- but the key stays as-is so existing
-#: configurations keep their value.
-CONF_SCAN_INTERVAL: Final = "scan_interval"
-
 #: When true, pack temperature sensors reporting a fault sentinel (-50 C or
 #: -30 C) report unavailable instead of the sentinel value. Off by default so
 #: the integration mirrors the vendor app, which displays the sentinel.
 CONF_HIDE_SENTINEL_TEMPERATURES: Final = "hide_sentinel_temperatures"
 DEFAULT_HIDE_SENTINEL_TEMPERATURES: Final = False
 
-#: A minute is about where the useful resolution runs out: a pack drifts a few
-#: millivolts over that, so sampling faster mostly records noise. It also keeps
-#: the gateway busy only ~10% of the time, which leaves its single connection
-#: slot free for the vendor app.
+#: Floor on the gap between entity updates.
 #:
-#: Lower is allowed down to MIN_SCAN_INTERVAL, which is what you want when
-#: watching something happen rather than logging it.
-DEFAULT_SCAN_INTERVAL: Final = 60  # seconds
-MAX_SCAN_INTERVAL: Final = 3600
-
-#: Floor on the poll delay.
+#: Not a poll interval -- nothing is being asked for. The bank pushes frames on
+#: its own cadence and a burst can carry several batteries at once, so updates
+#: are coalesced to this and the most recent state wins.
 #:
-#: Equal to the default, because below it the setting does nothing measurable.
-#: Polls are triggered by advertisements and this gateway advertises every
-#: 245-300 seconds, so any delay shorter than that cadence means the same
-#: thing: "poll on every advertisement". A 10 second option was offered
-#: briefly; it was indistinguishable from 60 in practice and only implied a
-#: control that does not exist.
-MIN_SCAN_INTERVAL: Final = 60
-
-#: An advertisement is the only chance to poll, and they arrive on a jittery
-#: cadence rather than an exact grid. Requiring the full delay to have elapsed
-#: means one landing a few seconds early is thrown away and the next chance is
-#: a whole cadence later -- 289 s after the last poll, with a 300 s delay, costs
-#: another five minutes for the sake of 11 s.
-#:
-#: So accept one this close to due. A fraction so it scales with the delay.
-POLL_GRACE_FRACTION: Final = 0.1
-
-#: Upper bound on how long one poll may hold the connection. The gateway
-#: round-robins the bank at roughly 5-6 s per battery, so this needs headroom.
-LISTEN_TIMEOUT: Final = 60.0
+#: Set to the measured cell cadence rather than lower. Each battery emits cell
+#: frames every ~5.1 s, so a faster push mostly re-reports numbers that have not
+#: changed. Measured live, per ten minutes of recorder rows for this
+#: integration's entities: 205 under five-minute polling, 4742 at a 2 s
+#: throttle, 3838 at 5 s. The modest difference between the last two is the
+#: point -- most of that volume is real change arriving at the hardware's own
+#: rate, not throttle churn, so lowering this buys noise and raising it would
+#: start dropping readings. Latency to a genuinely new value is at most one
+#: interval: a pending update fires the moment the throttle expires.
+UPDATE_THROTTLE: Final = 5.0
 
 #: BlueZ must resolve services on a first connection; HA requires >= 10 s.
 CONNECT_TIMEOUT: Final = 20.0
@@ -71,41 +50,27 @@ CONNECT_TIMEOUT: Final = 20.0
 #: enough to prove the point, and a config flow should not hang.
 PROBE_TIMEOUT: Final = 35.0
 
-#: 0 means "work it out", which is the normal case. A non-zero value forces
-#: the count and is only needed when the automatic answer is wrong.
-#: Removed in version 2. The bank master states its own size, so an override
-#: could only ever disagree with an authoritative answer. Kept as a name so
-#: the migration can strip it from options stored by version 1.
-OBSOLETE_OPTIONS: Final = frozenset({"expected_batteries", "auto_battery_count"})
-
-#: How often to run a poll that ignores the detected count and waits out the
-#: full listening window.
+#: Options that older versions stored and this one does not, stripped by
+#: async_migrate_entry so they do not sit in the entry as litter.
 #:
-#: This is the poll that establishes the bank size, and it is the only one that
-#: can. Measured over 25 polls: the master's topology frame -- the one carrying
-#: the roster -- arrived on exactly the three that were full scans and on none
-#: of the other twenty-two. The gateway round-robins its frame types, an
-#: ordinary poll exits after about 18 seconds once every battery has sent its
-#: summary and cells, and the roster has not come round by then. In the capture
-#: it appears 18 times against 252 summaries, so it is a rare frame.
-#:
-#: It is therefore not an optional safety net that the roster makes redundant.
-#: Remove it and the roster goes too, expected_batteries never leaves 0, and
-#: every poll waits out the full window forever -- worse than one per hour.
-#:
-#: It is also what lets a battery that has been *added* be discovered, and one
-#: that has been *removed* stop being waited for.
-FULL_SCAN_INTERVAL: Final = 3600.0  # seconds
+#: * ``expected_batteries`` / ``auto_battery_count`` (version 2): the bank
+#:   master states its own size, so an override could only ever disagree with
+#:   an authoritative answer.
+#: * ``scan_interval`` (version 3): there is no polling left to space out. The
+#:   connection is held open and the bank pushes; how often readings arrive is
+#:   the hardware's business, not a setting.
+OBSOLETE_OPTIONS: Final = frozenset(
+    {"expected_batteries", "auto_battery_count", "scan_interval"}
+)
 
-#: How many polling intervals may pass without data before entities are
-#: reported unavailable. A single missed poll is routine on BLE; several in a
-#: row is a real problem worth surfacing.
-STALE_AFTER_INTERVALS: Final = 3
+#: Entity keys retired along with polling, removed from the registry on setup
+#: so they do not linger as permanently unavailable entities.
+RETIRED_SENSOR_KEYS: Final = ("poll_interval", "poll_duration", "consecutive_failures")
 
-#: ...but never sooner than this, however short the interval. Scaling purely
-#: with the interval means a fast poller declares itself dead absurdly quickly:
-#: at the 10 s floor, three missed polls is half a minute, and a BLE device can
-#: easily be unreachable that long while being perfectly healthy. The data is
-#: no more stale at a short interval than a long one -- only the sampling rate
-#: changed -- so the window has a floor of its own.
+#: How long without frames before entities report unavailable.
+#:
+#: Generous next to the ~5 s cadence, and deliberately so: the recovery path is
+#: what sets it. A dropped connection may have to wait for the gateway's next
+#: advertisement to reopen, and this hardware advertises every 245-300 s, so a
+#: shorter window would blank every entity on a single routine drop.
 MIN_STALE_WINDOW: Final = 300.0  # seconds

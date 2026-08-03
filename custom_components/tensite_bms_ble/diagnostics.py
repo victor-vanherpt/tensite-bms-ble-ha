@@ -4,10 +4,10 @@ Settings -> Devices & Services -> Tensite BMS -> the three-dot menu ->
 "Download diagnostics".
 
 This is where the detail that would otherwise need a dozen entities lives:
-polling health, frame parse statistics, and what each battery last reported.
-The question it is meant to answer is "polling is not behaving as I expect --
-why?", so it deliberately includes the things that explain a *lack* of data
-rather than only the data itself.
+connection health, frame parse statistics, and what each battery last
+reported. The question it is meant to answer is "readings are not arriving as I
+expect -- why?", so it deliberately includes the things that explain a *lack*
+of data rather than only the data itself.
 
 Serial numbers are redacted. They identify the hardware and appear in every
 frame, so a diagnostics file pasted into an issue would otherwise carry them.
@@ -25,9 +25,7 @@ from .const import (
     CONF_MEMBER_SERIALS,
     CONF_SERIAL,
     CONNECT_TIMEOUT,
-    LISTEN_TIMEOUT,
-    MAX_SCAN_INTERVAL,
-    MIN_SCAN_INTERVAL,
+    UPDATE_THROTTLE,
 )
 
 TO_REDACT = {CONF_SERIAL, CONF_MEMBER_SERIALS, "serial", "master_serial"}
@@ -46,17 +44,13 @@ async def async_get_config_entry_diagnostics(
             "options": dict(entry.options),
         },
         "limits": {
-            "min_poll_delay_s": MIN_SCAN_INTERVAL,
-            "max_poll_delay_s": MAX_SCAN_INTERVAL,
             "connect_timeout_s": CONNECT_TIMEOUT,
-            "listen_timeout_s": LISTEN_TIMEOUT,
+            "update_throttle_s": UPDATE_THROTTLE,
         },
-        "polling": coordinator.poll_health,
         "connection": {
             "address": coordinator.address,
-            "rssi": coordinator.rssi,
             "has_fresh_data": coordinator.has_fresh_data,
-            "expected_batteries": coordinator.expected_batteries,
+            **coordinator.connection_health,
         },
     }
 

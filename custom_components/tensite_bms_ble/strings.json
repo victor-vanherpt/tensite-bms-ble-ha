@@ -29,11 +29,9 @@
       "init": {
         "title": "Tensite BMS options",
         "data": {
-          "scan_interval": "Delay between polls (seconds)",
           "hide_sentinel_temperatures": "Hide non-reporting temperature sensors"
         },
         "data_description": {
-          "scan_interval": "How long to wait after one poll before another may start. It is a floor, not a schedule: polls are triggered by the gateway's Bluetooth advertisements, and this hardware advertises only every 4-5 minutes, so that cadence is the real ceiling on how often readings arrive. Raising this polls less often; lowering it cannot poll more often than the gateway advertises. Check the Time between polls sensor for what is actually happening.",
           "hide_sentinel_temperatures": "A pack temperature sensor that is not returning a reading reports -50 °C or -30 °C. By default those values are shown exactly as the Tensite app shows them. Enable this to report those sensors as unavailable instead, so they do not distort temperature history. Only those two values are affected — a genuinely cold pack below freezing is still reported normally."
         }
       }
@@ -118,25 +116,30 @@
       "active_alarms": {
         "name": "Active alarms"
       },
-      "poll_interval": {
-        "name": "Time between polls"
-      },
-      "poll_duration": {
-        "name": "Poll duration"
-      },
-      "consecutive_failures": {
-        "name": "Consecutive poll failures"
-      },
       "batteries_expected": {
         "name": "Batteries expected"
       },
       "batteries_reported": {
         "name": "Batteries reported"
+      },
+      "update_interval": {
+        "name": "Time between updates"
+      },
+      "reconnects": {
+        "name": "Reconnects"
+      },
+      "connection_failures": {
+        "name": "Connection failures"
       }
     },
     "binary_sensor": {
       "system_status": {
         "name": "System status"
+      }
+    },
+    "switch": {
+      "connection": {
+        "name": "Connection"
       }
     }
   }

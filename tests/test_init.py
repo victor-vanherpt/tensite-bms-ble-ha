@@ -6,9 +6,9 @@ imported it, and a coordinator method called that the base class did not have.
 Neither is visible to py_compile, and neither shows up until something actually
 imports every module and forwards the platforms.
 
-The advertisement that would normally trigger a poll is skipped -- when to poll
-is unit-tested separately -- and the poll is driven directly instead, so what
-is under test here is that a reading turns into the right set of entities.
+The advertisement that would normally open the connection is skipped -- when to
+connect is unit-tested separately -- and a reading is pushed directly instead,
+so what is under test here is that one turns into the right set of entities.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ class TestSetup:
         domains = {e.domain for e in entities}
         assert Platform.SENSOR in domains
         assert Platform.BINARY_SENSOR in domains
+        assert Platform.SWITCH in domains
 
     async def test_unload_is_clean(self, hass, entry):
         assert await hass.config_entries.async_unload(entry.entry_id)
@@ -160,15 +161,62 @@ class TestStates:
         assert hass.states.get(entity_id).state == "2"
 
 
+class TestRetiredEntities:
+    """Poll interval, poll duration and consecutive poll failures described a
+    connect-read-disconnect cycle that no longer exists.
+
+    Left in the registry they would sit there permanently unavailable, and on
+    dashboards as empty cards, with nothing to explain why.
+    """
+
+    async def test_a_retired_entity_is_removed_on_setup(self, hass, fake_stream):
+        from custom_components.tensite_bms_ble import CONFIG_VERSION
+
+        config_entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id=ADDRESS,
+            data={CONF_ADDRESS: ADDRESS, CONF_SERIAL: MASTER},
+            options={},
+            version=CONFIG_VERSION,
+        )
+        config_entry.add_to_hass(hass)
+
+        registry = er.async_get(hass)
+        stale = registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{ADDRESS}_poll_interval",
+            config_entry=config_entry,
+        )
+
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+        assert registry.async_get(stale.entity_id) is None
+
+    async def test_the_replacements_are_created(self, hass, entry):
+        registry = er.async_get(hass)
+        ids = {
+            e.unique_id
+            for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+        }
+        assert f"{ADDRESS}_update_interval" in ids
+        assert f"{ADDRESS}_poll_interval" not in ids
+
+
 class TestMigration:
-    """Version 1 could store a battery count; version 2 has no such option.
+    """Version 1 could store a battery count, version 2 a poll delay; neither
+    exists now -- the bank states its own size and nothing polls.
 
     Worth testing because it rewrites stored user configuration: getting it
     wrong either leaves litter behind or takes something it should not.
     """
 
     async def test_drops_the_obsolete_options(self, hass):
-        from custom_components.tensite_bms_ble import async_migrate_entry
+        from custom_components.tensite_bms_ble import (
+            CONFIG_VERSION,
+            async_migrate_entry,
+        )
 
         config_entry = MockConfigEntry(
             domain=DOMAIN,
@@ -183,8 +231,8 @@ class TestMigration:
         config_entry.add_to_hass(hass)
 
         assert await async_migrate_entry(hass, config_entry)
-        assert config_entry.version == 2
-        assert dict(config_entry.options) == {"scan_interval": 120}
+        assert config_entry.version == CONFIG_VERSION
+        assert dict(config_entry.options) == {}
 
     async def test_keeps_options_that_still_exist(self, hass):
         from custom_components.tensite_bms_ble import async_migrate_entry
@@ -198,30 +246,54 @@ class TestMigration:
         config_entry.add_to_hass(hass)
 
         assert await async_migrate_entry(hass, config_entry)
-        assert dict(config_entry.options) == {
-            "scan_interval": 300,
-            "hide_sentinel_temperatures": True,
-        }
+        assert dict(config_entry.options) == {"hide_sentinel_temperatures": True}
 
-    async def test_an_already_migrated_entry_is_left_alone(self, hass):
-        from custom_components.tensite_bms_ble import async_migrate_entry
+    async def test_a_version_2_entry_still_loses_its_poll_delay(self, hass):
+        """The entries an installed copy already has, not just fresh ones."""
+        from custom_components.tensite_bms_ble import (
+            CONFIG_VERSION,
+            async_migrate_entry,
+        )
 
         config_entry = MockConfigEntry(
-            domain=DOMAIN, version=2, data={CONF_ADDRESS: ADDRESS}, options={}
+            domain=DOMAIN,
+            version=2,
+            data={CONF_ADDRESS: ADDRESS},
+            options={"scan_interval": 60},
         )
         config_entry.add_to_hass(hass)
         assert await async_migrate_entry(hass, config_entry)
-        assert config_entry.version == 2
+        assert config_entry.version == CONFIG_VERSION
+        assert dict(config_entry.options) == {}
+
+    async def test_an_already_migrated_entry_is_left_alone(self, hass):
+        from custom_components.tensite_bms_ble import (
+            CONFIG_VERSION,
+            async_migrate_entry,
+        )
+
+        config_entry = MockConfigEntry(
+            domain=DOMAIN,
+            version=CONFIG_VERSION,
+            data={CONF_ADDRESS: ADDRESS},
+            options={},
+        )
+        config_entry.add_to_hass(hass)
+        assert await async_migrate_entry(hass, config_entry)
+        assert config_entry.version == CONFIG_VERSION
 
     async def test_an_entry_with_nothing_to_drop_still_migrates(self, hass):
-        from custom_components.tensite_bms_ble import async_migrate_entry
+        from custom_components.tensite_bms_ble import (
+            CONFIG_VERSION,
+            async_migrate_entry,
+        )
 
         config_entry = MockConfigEntry(
             domain=DOMAIN, version=1, data={CONF_ADDRESS: ADDRESS}, options={}
         )
         config_entry.add_to_hass(hass)
         assert await async_migrate_entry(hass, config_entry)
-        assert config_entry.version == 2
+        assert config_entry.version == CONFIG_VERSION
 
     async def test_reports_what_it_actually_dropped(self, hass, caplog):
         """Reading entry.options after the update reports what survived."""

@@ -1,7 +1,7 @@
 """The downloadable diagnostics report.
 
 This is what someone attaches to a bug report, so the things worth checking are
-that it answers "why is polling failing", that it survives having no data at
+that it answers "why is nothing arriving", that it survives having no data at
 all -- which is exactly when it is most likely to be requested -- and that it
 does not leak the serial numbers that identify the hardware.
 """
@@ -17,27 +17,27 @@ from custom_components.tensite_bms_ble.diagnostics import (
 from .test_init import MASTER, SLAVE
 
 
-async def test_reports_polling_health(hass, entry):
+async def test_reports_connection_health(hass, entry):
     data = await async_get_config_entry_diagnostics(hass, entry)
-    polling = data["polling"]
+    connection = data["connection"]
     # The questions a stuck integration raises, in one place.
     for key in (
-        "configured_delay_s",
-        "achieved_interval_s",
-        "last_duration_s",
-        "polls",
-        "failures",
-        "consecutive_failures",
+        "enabled",
+        "connected",
+        "connected_for_s",
+        "reconnects",
+        "update_interval_s",
+        "connection_failures",
         "last_error",
         "seconds_since_data",
         "batteries_expected",
         "batteries_reported",
     ):
-        assert key in polling, key
+        assert key in connection, key
 
 
 async def test_reports_frame_statistics(hass, entry):
-    """A climbing reject ratio looks identical to "not polling" from outside."""
+    """A climbing reject ratio looks identical to "nothing arriving" outside."""
     frames = (await async_get_config_entry_diagnostics(hass, entry))["reading"][
         "frames"
     ]
@@ -81,5 +81,5 @@ async def test_survives_having_no_data_at_all(hass, entry):
     entry.runtime_data.data = None
     data = await async_get_config_entry_diagnostics(hass, entry)
     assert data["reading"] is None
-    assert data["polling"] is not None
-    assert data["limits"]["min_poll_delay_s"] >= 60
+    assert data["connection"]["connected"] is not None
+    assert data["limits"]["update_throttle_s"] > 0

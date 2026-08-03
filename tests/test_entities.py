@@ -28,7 +28,6 @@ FAULTY_BITS = bytes.fromhex("0000300000000000")
 
 
 def make_coordinator(hass, **kwargs) -> TensiteClusterCoordinator:
-    kwargs.setdefault("poll_delay", 60)
     return TensiteClusterCoordinator(
         hass=hass, address=ADDRESS, serial=None, **kwargs
     )
@@ -124,8 +123,8 @@ class TestSensorDescriptions:
         assert not any(d.key == "battery_count" for d in CLUSTER_SENSORS)
 
     def test_connection_diagnostics_survive_having_no_data(self):
-        """A "why is polling failing" sensor is useless if it goes unavailable."""
-        for key in ("poll_interval", "poll_duration", "consecutive_failures"):
+        """A "why is nothing arriving" sensor is useless if it goes unavailable."""
+        for key in ("update_interval", "reconnects", "connection_failures"):
             description = next(d for d in CLUSTER_SENSORS if d.key == key)
             assert description.coordinator_fn is not None
 

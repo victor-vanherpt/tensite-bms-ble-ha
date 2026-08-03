@@ -33,8 +33,8 @@ Cluster C01                      ← the BLE gateway
 └── Battery P03 08051
 ```
 
-Batteries and cells appear after the first successful poll, not at setup, since
-the bank is only enumerated once frames start arriving.
+Batteries and cells appear once the connection opens, not at setup, since the
+bank is only enumerated when frames start arriving.
 
 ### Entities
 
@@ -42,10 +42,11 @@ the bank is only enumerated once frames start arriving.
 |---|---|---|
 | Cluster | System status | Ok / Problem across the bank, `device_class: problem` |
 | Cluster | Active alarms | how many are firing, with their names as attributes |
-| Cluster | Batteries expected / reported | the bank's own count, and how many answered the last poll |
+| Cluster | Batteries expected / reported | the bank's own count, and how many are currently reporting |
 | Cluster | Stack voltage, Min / max cell voltage, Cell imbalance | across every cell |
 | Cluster | Charging state | charging / discharging / idle, derived from current |
-| Cluster | Time between polls, Poll duration, Consecutive poll failures | diagnostic |
+| Cluster | Connection | switch: release the gateway for another app |
+| Cluster | Time between updates, Reconnects, Connection failures | diagnostic |
 | Cluster | Signal strength | RSSI, diagnostic, disabled by default |
 | Battery | System status | Ok / Problem for that battery |
 | Battery | Active alarms | count plus the firing alarm names |
@@ -59,24 +60,56 @@ the bank is only enumerated once frames start arriving.
 **Cell imbalance** is the one worth an automation — a cell drifting away from
 its pack is the earliest visible sign of a failing cell.
 
+## How data arrives
+
+The connection is **held open**, not made per reading. That follows from what
+the gateway does: it streams unprompted the moment notifications are enabled,
+for the whole bank at once. In a 182-second capture of the vendor app, all four
+batteries emitted cell frames every ~5.1 s *concurrently*, and kept doing so for
+81 s after the app sent its last byte.
+
+Polling could not use any of that. Connecting cost ~12 s of a ~18 s cycle, and a
+connection can only be established while Home Assistant holds a connectable path
+for the address — which exists around advertisements, and this gateway
+advertises every 245–300 s. So readings arrived every five minutes from hardware
+publishing them every five seconds.
+
+Advertisements still matter, but only for *opening* the connection. Once open it
+sustains itself, and updates are pushed as frames arrive, coalesced to at most
+one every 5 s — the measured cell cadence, so nothing is dropped and nothing is
+re-reported. *Time between updates* shows what is actually achieved; on live
+hardware it reads 5.1 s, the gateway's own rate.
+
+### Recorder volume
+
+Readings every 5 s instead of every 5 minutes is a lot more history. Measured on
+a live bank of four, recorder rows per ten minutes for this integration's
+entities: **205** under five-minute polling, **3838** streaming. Most of that is
+genuine change — a 2 s throttle only raised it to 4742 — so it is the price of
+the data, not overhead.
+
+If your database is on an SD card, or you only want the long-term shape,
+exclude the noisiest entities:
+
+```yaml
+recorder:
+  exclude:
+    entity_globs:
+      - sensor.*_cell_??_voltage      # 64 entities changing every 5 s
+      - sensor.*_time_between_updates
+```
+
 ## Battery count
 
 There is nothing to configure. The bank master states how many batteries it
 has, in a header byte of its topology frame, and *Batteries expected* reports
-that. *Batteries reported* is how many answered the most recent poll — below
-expected on a single poll is normal, since the gateway answers its batteries in
-rotation; below expected on every poll is not.
+that. That frame is rare — 18 against 252 summaries in a captured session —
+which under polling meant an hour-long full-scan cycle to catch one. On a held
+connection it simply arrives.
 
-Once an hour a poll ignores that count and waits out the full listening window.
-That poll is what establishes the bank size, and it is the only one that can:
-measured over 25 polls, the topology frame arrived on the three that were full
-scans and on none of the other twenty-two. An ordinary poll exits after about
-18 seconds once every battery has sent its summary and cells, and the roster
-has not come round in the rotation by then — it is a rare frame, appearing 18
-times against 252 summaries in a captured session.
-
-So the hourly poll is not redundant with the roster; it is how the roster is
-obtained. It is also what notices a battery being added or removed.
+*Batteries reported* is how many are currently reporting. On a live connection
+every battery reports every ~5 s, so this should equal the expected count within
+seconds of connecting; it drops to zero when the connection does.
 
 ## Alarms
 
@@ -200,21 +233,25 @@ coordinator per cluster. A coordinator per battery — the obvious-looking desig
 — has them fighting over the single connection slot.
 
 The practical consequence: **nothing else may talk to the gateway** while this
-integration is loaded. Stop any batmon-ha add-on, script, or the vendor app
-before expecting data.
+integration holds the connection — the vendor app included.
+
+That is what the **Connection** switch on the cluster device is for. Turn it off
+and the integration disconnects immediately and stays disconnected: no
+advertisement reopens it, and the app can connect. Turn it back on and it
+reconnects at the next opportunity. Every other entity goes unavailable while it
+is off, which is the honest state; the switch itself stays available, since it is
+the control that undoes this.
 
 ## Options
 
 **Settings → Devices & Services → Tensite BMS → Configure**
 
-- **Delay between polls** (default 60 s, min 60). A floor, not a schedule:
-  polls are triggered by the gateway's Bluetooth advertisements, and this
-  hardware advertises only every 4–5 minutes, so that cadence is the real
-  ceiling. Raising this polls less often; lowering it cannot poll more often
-  than the gateway advertises. Watch *Time between polls* for what is actually
-  happening.
 - **Hide non-reporting temperature sensors** (default off). See
   [Temperatures](#temperatures).
+
+There is no update interval to set: the connection is held open and the bank
+pushes on its own cadence. Releasing the connection is the **Connection** switch
+rather than an option, because it is something you toggle and then toggle back.
 
 ## What it reports
 
@@ -233,14 +270,15 @@ Built to the [Home Assistant Bluetooth guidelines](https://developers.home-assis
 
 - Uses Home Assistant's shared scanner and Bluetooth cache; it never starts a
   scanner of its own.
-- Polls from `service_info.device`, the cheapest route to a usable `BLEDevice`,
-  falling back to `async_ble_device_from_address` when the advertisement
-  arrived via a non-connectable proxy.
+- Connects from `service_info.device`, the cheapest route to a usable
+  `BLEDevice`, falling back to `async_ble_device_from_address` when the
+  advertisement arrived via a non-connectable proxy, and re-adopts a freshly
+  resolved one on every advertisement so reconnects do not use a stale handle.
 - Connects through `bleak-retry-connector`, with a ≥10 s timeout so BlueZ can
   resolve services on a first connection.
 - Declares `bluetooth_adapters` as a dependency so remote adapters are up first.
-- Polls are driven by advertisements, so a cluster that goes out of range stops
-  being polled instead of timing out repeatedly.
+- Connections are opened on advertisements, so a cluster that goes out of range
+  stops being retried instead of timing out repeatedly.
 
 Works over ESPHome Bluetooth proxies, provided the proxy allows **active
 connections** (ESPHome 2022.9.3+). Advertisement-only proxies are rejected in
@@ -252,12 +290,15 @@ the config flow with a clear reason, since cell data needs a real connection.
 nothing else holds the gateway's single connection. Advertising is intermittent
 — give discovery a minute.
 
-**Entities unavailable after setup.** The cluster is advertising but no poll has
-succeeded. Usually something else is holding the connection slot.
+**Entities unavailable after setup.** The cluster is advertising but the
+connection has not opened. Usually something else is holding the single slot —
+check the *Connection* switch is on and that the vendor app is closed. The
+connection opens on the gateway's next advertisement, which can be five minutes
+away.
 
-**Only some batteries appear.** The gateway round-robins the bank at roughly
-5–6 s per battery. Set *Batteries in this cluster* to your actual count, or wait
-another poll.
+**Only some batteries appear.** On a held connection every battery reports
+within a few seconds, so this should resolve itself; if it does not, check
+*Batteries expected* against *Batteries reported* and the frame reject rate.
 
 Debug logging:
 

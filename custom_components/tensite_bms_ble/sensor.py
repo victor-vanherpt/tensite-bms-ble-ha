@@ -144,13 +144,11 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         suggested_display_precision=1,
     ),
-    # --- polling health -------------------------------------------------
-    # The interval is a floor, not a schedule: a poll can only begin when an
-    # advertisement arrives. So report what was actually achieved alongside
-    # what was asked for, which is the only way to tell "set to 60 s but the
-    # gateway only advertises every 300" from "polling is broken".
-    # Detected, not configured: what the last full-window poll counted. See
-    # FULL_SCAN_INTERVAL for why only those polls may set it.
+    # --- connection health ----------------------------------------------
+    # Nothing here describes the batteries; they answer "is data flowing, and
+    # if not, why?". They read from the coordinator so they survive a total
+    # loss of data -- a diagnostic that goes unavailable with everything else
+    # explains nothing.
     ClusterSensorDescription(
         key="batteries_expected",
         translation_key="batteries_expected",
@@ -159,8 +157,9 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    # Below expected on any single poll is normal -- the gateway answers its
-    # batteries in rotation. Below expected every poll is not.
+    # On a held connection every battery reports every ~5 s, so this should
+    # equal the expected count within seconds of connecting. It falls to zero
+    # when the connection drops, which is the point.
     ClusterSensorDescription(
         key="batteries_reported",
         translation_key="batteries_reported",
@@ -169,31 +168,31 @@ CLUSTER_SENSORS: tuple[ClusterSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    # The freshness number: near the update throttle while streaming, minutes
+    # when the stream is down and waiting on an advertisement to reconnect.
     ClusterSensorDescription(
-        key="poll_interval",
-        translation_key="poll_interval",
+        key="update_interval",
+        translation_key="update_interval",
         value_fn=lambda r: None,
-        coordinator_fn=lambda c: c.last_poll_interval,
-        native_unit_of_measurement="s",
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=0,
-        entity_category=EntityCategory.DIAGNOSTIC,
-    ),
-    ClusterSensorDescription(
-        key="poll_duration",
-        translation_key="poll_duration",
-        value_fn=lambda r: None,
-        coordinator_fn=lambda c: c.last_poll_duration,
+        coordinator_fn=lambda c: c.update_interval_seconds,
         native_unit_of_measurement="s",
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=1,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     ClusterSensorDescription(
-        key="consecutive_failures",
-        translation_key="consecutive_failures",
+        key="reconnects",
+        translation_key="reconnects",
         value_fn=lambda r: None,
-        coordinator_fn=lambda c: c.consecutive_failures,
+        coordinator_fn=lambda c: c.reconnects,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ClusterSensorDescription(
+        key="connection_failures",
+        translation_key="connection_failures",
+        value_fn=lambda r: None,
+        coordinator_fn=lambda c: c.connection_failures,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
@@ -546,7 +545,7 @@ class TensiteClusterSensor(TensiteEntity, SensorEntity):
     @property
     def available(self) -> bool:
         # Connection diagnostics must survive a total loss of data -- an
-        # unavailable "why is polling failing" sensor is useless.
+        # unavailable "why is nothing arriving" sensor is useless.
         if self.entity_description.coordinator_fn is not None:
             return True
         return super().available
@@ -562,7 +561,7 @@ class TensiteClusterSensor(TensiteEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, object] | None:
         if self.entity_description.coordinator_fn is not None:
-            return self.coordinator.poll_health
+            return self.coordinator.connection_health
         attrs_fn = self.entity_description.attrs_fn
         if attrs_fn is None or (reading := self.coordinator.data) is None:
             return None

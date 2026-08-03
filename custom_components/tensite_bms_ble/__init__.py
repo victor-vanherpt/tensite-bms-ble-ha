@@ -14,18 +14,20 @@ from .const import (
     CONF_ADDRESS,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
-    OBSOLETE_OPTIONS,
-    CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     DEFAULT_HIDE_SENTINEL_TEMPERATURES,
-    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    OBSOLETE_OPTIONS,
+    RETIRED_SENSOR_KEYS,
 )
 from .coordinator import TensiteClusterCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
+
+#: Bumped when stored options change shape; see async_migrate_entry.
+CONFIG_VERSION = 3
 
 type TensiteConfigEntry = ConfigEntry[TensiteClusterCoordinator]
 
@@ -33,12 +35,13 @@ type TensiteConfigEntry = ConfigEntry[TensiteClusterCoordinator]
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Strip options that no longer exist.
 
-    Version 1 could store a battery count and a detect-automatically flag. The
+    Version 1 could store a battery count and a detect-automatically flag; the
     bank master states its own size, so an override could only ever disagree
-    with an authoritative answer -- it is gone, and leaving the keys behind
-    would just be litter that a later reader has to work out the meaning of.
+    with an authoritative answer. Version 2 could store a poll delay; there is
+    no polling left to space out. Leaving either behind would just be litter
+    that a later reader has to work out the meaning of.
     """
-    if entry.version >= 2:
+    if entry.version >= CONFIG_VERSION:
         return True
 
     # Work out what is going before replacing the options, not after: reading
@@ -46,10 +49,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # always say nothing was dropped.
     dropped = sorted(set(entry.options) & OBSOLETE_OPTIONS)
     options = {k: v for k, v in entry.options.items() if k not in OBSOLETE_OPTIONS}
-    hass.config_entries.async_update_entry(entry, options=options, version=2)
+    hass.config_entries.async_update_entry(
+        entry, options=options, version=CONFIG_VERSION
+    )
     _LOGGER.debug(
-        "%s: migrated to version 2, dropped %s",
+        "%s: migrated to version %d, dropped %s",
         entry.data.get(CONF_ADDRESS),
+        CONFIG_VERSION,
         ", ".join(dropped) or "nothing",
     )
     return True
@@ -64,7 +70,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
         hass=hass,
         address=address,
         serial=serial,
-        poll_delay=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         hide_sentinel_temperatures=entry.options.get(
             CONF_HIDE_SENTINEL_TEMPERATURES, DEFAULT_HIDE_SENTINEL_TEMPERATURES
         ),
@@ -77,10 +82,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
     # listening for advertisements by the time entities are created.
     # async_start registers the Bluetooth callbacks and returns the unsubscribe.
     #
-    # No first poll here on purpose. Polls are driven by advertisements, and
-    # this gateway can be minutes away from its next one -- blocking setup on
-    # that would stall startup, and failing setup would mean no entities at all
-    # for a device that is merely quiet. Entities appear as the bank reports.
+    # No connection attempt here on purpose. One can only be made while Home
+    # Assistant holds a connectable path for the address, which exists around
+    # advertisements, and this gateway can be minutes away from its next one --
+    # blocking setup on that would stall startup, and failing setup would mean
+    # no entities at all for a device that is merely quiet. The stream opens on
+    # the first advertisement and entities fill in as the bank reports.
     entry.async_on_unload(coordinator.async_start())
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(
@@ -90,6 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
     )
 
     _async_migrate_cells_onto_batteries(hass, entry)
+    _async_remove_retired_entities(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -100,17 +108,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> b
     # Entities report unavailable until the first poll lands, which is the
     # honest state anyway.
     _LOGGER.debug(
-        "%s: set up (serial=%s, interval=%ss, advertisement seen=%s)",
+        "%s: set up (serial=%s, data already available=%s)",
         address,
         serial,
-        coordinator.poll_delay,
         coordinator.available,
     )
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TensiteConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry, releasing the gateway's connection slot.
+
+    Disconnecting explicitly rather than leaving it to garbage collection: the
+    gateway takes one central at a time, so a reload that kept the old link
+    open would lock out the new coordinator that replaces it.
+    """
+    await entry.runtime_data.async_release()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
@@ -162,6 +175,33 @@ def _async_record_membership(
 
     if changed:
         hass.config_entries.async_update_entry(entry, data=data)
+
+
+@callback
+def _async_remove_retired_entities(
+    hass: HomeAssistant, entry: TensiteConfigEntry
+) -> None:
+    """Delete entities for diagnostics that no longer exist.
+
+    Poll interval, poll duration and consecutive poll failures described a
+    connect-read-disconnect cycle that is gone. Nothing will ever write to them
+    again, so left alone they would sit in the registry as permanently
+    unavailable entities and in dashboards as empty cards.
+    """
+    ent_reg = er.async_get(hass)
+    address = entry.data[CONF_ADDRESS]
+    removed = []
+    for key in RETIRED_SENSOR_KEYS:
+        entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{address}_{key}")
+        if entity_id is not None:
+            ent_reg.async_remove(entity_id)
+            removed.append(entity_id)
+    if removed:
+        _LOGGER.info(
+            "Removed %d retired polling entities: %s",
+            len(removed),
+            ", ".join(removed),
+        )
 
 
 _CELL_UNIQUE_ID = re.compile(r"^(?P<serial>.+)_cell_\d+_voltage$")

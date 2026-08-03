@@ -14,12 +14,12 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from tensite_bms_ble import ClusterReading, TensiteError, TensiteNoDataError
 
+from custom_components.tensite_bms_ble.config_flow import TensiteOptionsFlow
+
 from custom_components.tensite_bms_ble.const import (
+    CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
-    CONF_SCAN_INTERVAL,
     DOMAIN,
-    MAX_SCAN_INTERVAL,
-    MIN_SCAN_INTERVAL,
 )
 
 ADDRESS = "AA:BB:CC:DD:EE:FF"
@@ -140,25 +140,19 @@ class TestUserFlow:
 
 
 class TestOptionsFlow:
-    async def test_poll_delay_is_bounded_by_what_the_hardware_allows(self):
-        """Below the advertising cadence the setting does nothing measurable."""
-        assert MIN_SCAN_INTERVAL <= MAX_SCAN_INTERVAL
-        assert MIN_SCAN_INTERVAL >= 60
+    """What is left to configure once the hardware answers the rest."""
 
-    @pytest.mark.parametrize("value", [MIN_SCAN_INTERVAL, 300, MAX_SCAN_INTERVAL])
-    def test_accepted_delays(self, value):
-        import voluptuous as vol
-
-        schema = vol.All(vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL))
-        assert schema(value) == value
-
-    @pytest.mark.parametrize("value", [1, MIN_SCAN_INTERVAL - 1, MAX_SCAN_INTERVAL + 1])
-    def test_rejected_delays(self, value):
-        import voluptuous as vol
-
-        schema = vol.All(vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL))
-        with pytest.raises(vol.Invalid):
-            schema(value)
+    async def test_only_the_temperature_option_remains(self, hass):
+        """No update interval: the connection is held and the bank pushes. No
+        battery count: the master states its own bank size."""
+        entry = MockConfigEntry(domain=DOMAIN, unique_id=ADDRESS, data={}, options={})
+        entry.add_to_hass(hass)
+        flow = TensiteOptionsFlow()
+        flow.hass = hass
+        flow.handler = entry.entry_id
+        result = await flow.async_step_init()
+        keys = {str(key) for key in result["data_schema"].schema}
+        assert keys == {CONF_HIDE_SENTINEL_TEMPERATURES}
 
 
 class TestStrings:
@@ -184,4 +178,4 @@ class TestStrings:
         data = strings["options"]["step"]["init"]["data"]
         described = strings["options"]["step"]["init"]["data_description"]
         assert set(described) <= set(data)
-        assert CONF_SCAN_INTERVAL in data
+        assert CONF_HIDE_SENTINEL_TEMPERATURES in data

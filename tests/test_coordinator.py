@@ -1,124 +1,73 @@
 """Coordinator decision logic.
 
-Every test here corresponds to something that actually broke in production, so
-each one names the failure it prevents rather than restating the code.
+Every test here corresponds to something that actually broke in production, or
+to a property the streaming design depends on, rather than restating the code.
 """
 
 from __future__ import annotations
 
-import pytest
-
-from custom_components.tensite_bms_ble.const import (
-    DEFAULT_SCAN_INTERVAL,
-    FULL_SCAN_INTERVAL,
-    LISTEN_TIMEOUT,
-    MIN_SCAN_INTERVAL,
-    MIN_STALE_WINDOW,
-    POLL_GRACE_FRACTION,
-    STALE_AFTER_INTERVALS,
-)
+from custom_components.tensite_bms_ble.const import MIN_STALE_WINDOW
 from custom_components.tensite_bms_ble.coordinator import TensiteClusterCoordinator
 
 ADDRESS = "AA:BB:CC:DD:EE:FF"
 
 
 def make_coordinator(hass, **kwargs) -> TensiteClusterCoordinator:
-    kwargs.setdefault("poll_delay", DEFAULT_SCAN_INTERVAL)
     return TensiteClusterCoordinator(
         hass=hass, address=ADDRESS, serial=None, **kwargs
     )
 
 
-class TestPollGating:
-    """When an advertisement should turn into a poll."""
+class TestConnectionGating:
+    """When an advertisement should be used to open the connection."""
 
-    def test_first_advertisement_always_polls(self, hass, service_info):
+    def test_first_advertisement_opens_it(self, hass, service_info):
         coordinator = make_coordinator(hass)
-        assert coordinator._needs_poll(service_info, None) is True
+        assert coordinator._needs_connection(service_info, None) is True
 
-    def test_timed_from_poll_start_not_poll_end(self, hass, service_info, monkeypatch):
-        """The bug that halved the polling rate.
-
-        The base class measures from when the previous poll *finished*, so the
-        seconds a poll spends holding the connection pushed the next
-        advertisement under the threshold and it was skipped -- 10 minutes for
-        a 5-minute setting. Timing from the start is what fixes it, so a poll
-        that began exactly one delay ago is due no matter how long it ran.
-        """
-        coordinator = make_coordinator(hass, poll_delay=300)
-        now = 10_000.0
-        monkeypatch.setattr(
-            "custom_components.tensite_bms_ble.coordinator.monotonic_time_coarse",
-            lambda: now,
-        )
-        coordinator._last_poll_started = now - 300
-        assert coordinator._needs_poll(service_info, None) is True
-
-    def test_grace_window_accepts_a_slightly_early_advertisement(
-        self, hass, service_info, monkeypatch
-    ):
-        """Advertisements jitter; one arriving early is the only chance for minutes.
-
-        Observed live: 289 s after the last poll with a 300 s delay. Rejecting
-        it cost a further five minutes for the sake of 11 s.
-        """
-        coordinator = make_coordinator(hass, poll_delay=300)
-        now = 10_000.0
-        monkeypatch.setattr(
-            "custom_components.tensite_bms_ble.coordinator.monotonic_time_coarse",
-            lambda: now,
-        )
-        coordinator._last_poll_started = now - 289
-        assert coordinator._needs_poll(service_info, None) is True
-
-    def test_still_refuses_an_advertisement_well_inside_the_delay(
-        self, hass, service_info, monkeypatch
-    ):
-        """The grace window must not swallow the delay entirely."""
-        coordinator = make_coordinator(hass, poll_delay=300)
-        now = 10_000.0
-        monkeypatch.setattr(
-            "custom_components.tensite_bms_ble.coordinator.monotonic_time_coarse",
-            lambda: now,
-        )
-        coordinator._last_poll_started = now - 100
-        assert coordinator._needs_poll(service_info, None) is False
-
-    def test_grace_scales_with_the_delay(self, hass):
-        """Expressed as a fraction so a short delay gets a short grace."""
-        assert make_coordinator(hass, poll_delay=300)._due_after == pytest.approx(270)
-        assert make_coordinator(hass, poll_delay=60)._due_after == pytest.approx(54)
-
-    def test_never_starts_a_poll_while_one_is_running(self, hass, service_info):
-        """Two connections to a gateway with one slot is the thing to avoid."""
+    def test_not_while_the_stream_is_already_running(self, hass, service_info):
+        """The whole point of holding it: connecting again would be a second
+        central on a gateway that accepts one."""
         coordinator = make_coordinator(hass)
-        coordinator._poll_in_progress = True
-        assert coordinator._needs_poll(service_info, None) is False
-        assert coordinator.polls_skipped_overlap == 1
+        coordinator._stream = _RunningStream()
+        assert coordinator._needs_connection(service_info, None) is False
+
+    def test_not_once_the_connection_has_been_released(self, hass, service_info):
+        """Turning the switch off must survive the next advertisement.
+
+        Otherwise the release would last only until the gateway next spoke,
+        which is the moment the user is trying to use the app.
+        """
+        coordinator = make_coordinator(hass)
+        coordinator._enabled = False
+        assert coordinator._needs_connection(service_info, None) is False
+
+    def test_a_reconnect_uses_the_freshly_resolved_device(self, hass, service_info):
+        """A stale BLEDevice points at an adapter that may no longer see the
+        battery, and reconnects made with one fail as if the bank were gone."""
+        coordinator = make_coordinator(hass)
+        stream = _RunningStream()
+        coordinator._stream = stream
+        service_info.device = object()
+        coordinator._needs_connection(service_info, None)
+        assert stream.device is service_info.device
 
 
 class TestStaleness:
     """When entities should give up on the last reading."""
 
-    def test_window_has_a_floor_so_fast_polling_does_not_flap(self, hass):
-        """Scaling purely with the delay declares death absurdly quickly.
-
-        At a 60 s delay three missed polls is three minutes, and a BLE device
-        can be unreachable that long while perfectly healthy. The data is no
-        more stale at a short delay -- only the sampling rate changed.
-        """
-        coordinator = make_coordinator(hass, poll_delay=60)
-        assert coordinator.stale_after == MIN_STALE_WINDOW + LISTEN_TIMEOUT
-
-    def test_window_scales_once_the_delay_exceeds_the_floor(self, hass):
-        coordinator = make_coordinator(hass, poll_delay=600)
-        assert coordinator.stale_after == 600 * STALE_AFTER_INTERVALS + LISTEN_TIMEOUT
+    def test_window_covers_a_reconnect_wait(self, hass):
+        """A drop may have to wait for the next advertisement to recover, and
+        this hardware advertises every 245-300 s. A shorter window would blank
+        every entity on a single routine drop."""
+        assert make_coordinator(hass).stale_after == MIN_STALE_WINDOW
+        assert MIN_STALE_WINDOW >= 300
 
     def test_no_data_is_never_fresh(self, hass):
         assert make_coordinator(hass).has_fresh_data is False
 
     def test_fresh_until_the_window_expires(self, hass, monkeypatch):
-        coordinator = make_coordinator(hass, poll_delay=60)
+        coordinator = make_coordinator(hass)
         now = 10_000.0
         monkeypatch.setattr(
             "custom_components.tensite_bms_ble.coordinator.monotonic_time_coarse",
@@ -131,15 +80,23 @@ class TestStaleness:
         coordinator._last_data_at = now - (coordinator.stale_after + 1)
         assert coordinator.has_fresh_data is False
 
+    def test_a_dropped_connection_keeps_the_last_reading(self, hass):
+        """Frames stop; what they last said stays true until it goes stale."""
+        coordinator = make_coordinator(hass)
+        coordinator.data = object()
+        coordinator._reported_batteries = 4
+        coordinator._async_handle_connection_change(False)
+        assert coordinator.data is not None
+        assert coordinator.batteries_reported == 0, "nothing is reporting now"
+
 
 class TestBatteryCount:
     """How the bank size is established.
 
-    There is nothing to configure. The master states it in its topology frame;
-    a full-window poll is only the fallback for before one has arrived. The
-    trap the fallback avoids: an ordinary poll stops as soon as *expected*
-    batteries have reported, so counting its results would just re-measure the
-    exit condition, and an undercount would latch permanently.
+    There is nothing to configure. The master states it in a header byte of its
+    topology frame; counting who has reported is the fallback for before one
+    arrives. That fallback is sound here and was not under polling: on a held
+    connection every battery reports every ~5 s, so the tally is the bank.
     """
 
     def test_unknown_until_something_reports(self, hass):
@@ -152,54 +109,31 @@ class TestBatteryCount:
         assert coordinator.expected_batteries == 4
         assert coordinator.battery_count_source == "roster"
 
-    def test_the_roster_beats_a_full_scan(self, hass):
+    def test_the_roster_beats_the_tally(self, hass):
         """It is a statement by the bank, not a count of who happened to reply."""
         coordinator = make_coordinator(hass)
-        coordinator._learned_batteries = 3
+        coordinator._reported_batteries = 3
         coordinator._roster_batteries = 4
         assert coordinator.expected_batteries == 4
         assert coordinator.battery_count_source == "roster"
 
-    def test_full_scan_is_the_fallback(self, hass):
+    def test_the_tally_is_the_fallback(self, hass):
         coordinator = make_coordinator(hass)
-        coordinator._learned_batteries = 4
+        coordinator._reported_batteries = 4
         assert coordinator.expected_batteries == 4
-        assert coordinator.battery_count_source == "full scan"
-
-    def test_full_scan_due_before_any_has_run(self, hass):
-        """So the bank size is established on the very first poll."""
-        assert make_coordinator(hass)._is_full_scan_due() is True
-
-    def test_full_scan_not_due_again_immediately(self, hass, monkeypatch):
-        coordinator = make_coordinator(hass)
-        now = 10_000.0
-        monkeypatch.setattr(
-            "custom_components.tensite_bms_ble.coordinator.monotonic_time_coarse",
-            lambda: now,
-        )
-        coordinator._last_full_scan = now - 10
-        assert coordinator._is_full_scan_due() is False
-
-    def test_full_scan_due_again_after_the_interval(self, hass, monkeypatch):
-        """The re-assert that finds a battery added and drops one removed."""
-        coordinator = make_coordinator(hass)
-        now = 10_000.0
-        monkeypatch.setattr(
-            "custom_components.tensite_bms_ble.coordinator.monotonic_time_coarse",
-            lambda: now,
-        )
-        coordinator._last_full_scan = now - FULL_SCAN_INTERVAL
-        assert coordinator._is_full_scan_due() is True
+        assert coordinator.battery_count_source == "stream"
 
 
-class TestConstants:
-    """Guards on values whose justification is measured, not chosen."""
+class _RunningStream:
+    """Enough of a stream for the gating tests."""
 
-    def test_minimum_delay_matches_what_the_hardware_allows(self):
-        """Below the advertising cadence the setting does nothing measurable."""
-        assert MIN_SCAN_INTERVAL == DEFAULT_SCAN_INTERVAL
+    is_running = True
+    is_connected = True
+    reconnects = 0
+    last_error = None
 
-    def test_grace_leaves_most_of_the_delay_intact(self):
-        assert 0 < POLL_GRACE_FRACTION <= 0.25
+    def __init__(self) -> None:
+        self.device = None
 
-
+    def update_device(self, device) -> None:
+        self.device = device

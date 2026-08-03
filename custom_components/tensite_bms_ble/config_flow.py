@@ -23,7 +23,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
-from homeassistant.helpers import config_validation as cv, selector
+from homeassistant.helpers import config_validation as cv
 from tensite_bms_ble import (
     SERIAL_MARKER,
     TensiteClusterClient,
@@ -32,18 +32,15 @@ from tensite_bms_ble import (
     is_tensite_advertisement,
 )
 
+from . import CONFIG_VERSION
 from .const import (
     CONF_ADDRESS,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
-    CONF_SCAN_INTERVAL,
     CONF_SERIAL,
     CONNECT_TIMEOUT,
     DEFAULT_HIDE_SENTINEL_TEMPERATURES,
-    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    MAX_SCAN_INTERVAL,
-    MIN_SCAN_INTERVAL,
     PROBE_TIMEOUT,
 )
 
@@ -67,7 +64,7 @@ def _title(serial: str | None, address: str) -> str:
 class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for a Tensite battery cluster."""
 
-    VERSION = 2
+    VERSION = CONFIG_VERSION
 
     def __init__(self) -> None:
         self._discovered: dict[str, str | None] = {}
@@ -237,15 +234,18 @@ class TensiteConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class TensiteOptionsFlow(OptionsFlow):
-    """Tune polling behaviour after setup."""
+    """What is left to configure once the hardware answers the rest.
+
+    There is no update interval here: the connection is held open and the bank
+    pushes frames on its own cadence. Nor a battery count: the master states
+    its own bank size. Releasing the connection is a switch entity, not an
+    option, because it is something you toggle and then toggle back.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            # A blank battery-count box comes back as None. Drop it rather than
-            # storing a null, so "not set" and "set to nothing" are the same
-            # thing and both mean "detect it".
             return self.async_create_entry(
                 data={k: v for k, v in user_input.items() if v is not None}
             )
@@ -255,25 +255,6 @@ class TensiteOptionsFlow(OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    # Number boxes rather than sliders: both of these are
-                    # values people type deliberately, not ones they scrub to.
-                    vol.Optional(
-                        CONF_SCAN_INTERVAL,
-                        default=options.get(
-                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-                        ),
-                    ): vol.All(
-                        selector.NumberSelector(
-                            selector.NumberSelectorConfig(
-                                min=MIN_SCAN_INTERVAL,
-                                max=MAX_SCAN_INTERVAL,
-                                step=1,
-                                unit_of_measurement="s",
-                                mode=selector.NumberSelectorMode.BOX,
-                            )
-                        ),
-                        vol.Coerce(int),
-                    ),
                     vol.Optional(
                         CONF_HIDE_SENTINEL_TEMPERATURES,
                         default=options.get(

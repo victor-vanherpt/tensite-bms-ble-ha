@@ -50,6 +50,10 @@ views:
   sections:
   - type: grid
     cards:
+    - type: custom:tensite-cell-grid
+      device: Battery PA0 08146
+  - type: grid
+    cards:
     - type: entities
       title: Overview
       entities:
@@ -158,6 +162,10 @@ views:
   type: sections
   max_columns: 3
   sections:
+  - type: grid
+    cards:
+    - type: custom:tensite-cell-grid
+      device: Battery P01 08099
   - type: grid
     cards:
     - type: entities
@@ -270,6 +278,10 @@ views:
   sections:
   - type: grid
     cards:
+    - type: custom:tensite-cell-grid
+      device: Battery P02 08313
+  - type: grid
+    cards:
     - type: entities
       title: Overview
       entities:
@@ -376,6 +388,10 @@ views:
   type: sections
   max_columns: 3
   sections:
+  - type: grid
+    cards:
+    - type: custom:tensite-cell-grid
+      device: Battery P03 08051
   - type: grid
     cards:
     - type: entities

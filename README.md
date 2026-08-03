@@ -248,6 +248,95 @@ Entity ids are installation specific, so regenerate after adding a battery:
 uv run --with pyyaml python tools/make_dashboard.py root@homeassistant > dashboard.yaml
 ```
 
+## Cell grid card
+
+A Lovelace card showing one battery's sixteen cells as a 2x8 grid, shaded by
+where each cell sits relative to the rest of its pack, with the highest and
+lowest ringed in dashed red and blue.
+
+```
+        ▲   1.24 kW   ▲          ← up while discharging, down while charging
+  ┌───────────┬───────────┐
+  │ 01  3.282 │ 02  3.290 │      ← green shaded by position within the pack
+  │ 03  3.288 │ 04  3.288 │
+  │ …         │ …         │
+  │ 13  3.279 │ 14  3.289 │      ← 13 is the lowest: blue dashed border
+  │ 15  3.285 │ 16  3.280 │
+  └───────────┴───────────┘
+  Pack voltage        52.59 V
+  Imbalance              11 mV
+```
+
+It runs entirely in the browser. Colouring sixteen cells by value needs either
+Jinja evaluated on the server -- which re-renders on every state change while
+the view is open, several thousand times an hour now that readings arrive every
+5 s -- or something client-side. The card writes each cell's *raw voltage* into
+a CSS custom property and lets CSS do the arithmetic and the colour mixing;
+JavaScript computes only the pack bounds and a couple of reciprocals, because
+`calc()` division with a variable divisor is the one part browsers disagree
+about.
+
+### Install
+
+```bash
+task deploy-card                      # copies www/tensite-cell-grid.js to /config/www
+```
+
+Then **Settings -> Dashboards -> three-dot menu -> Resources -> Add**, URL
+`/local/tensite-cell-grid.js?v=1`, type *JavaScript module*. Bump the number
+in `?v=` whenever you redeploy the card, or browsers keep serving the old copy.
+
+```yaml
+type: custom:tensite-cell-grid
+device: Battery PA0 08146
+```
+
+`device` is the only required option -- everything else is found on that
+device, which matters because the per-cell entities are named
+`sensor.cell_01_voltage` (with `_2`/`_3`/`_4` for the second, third and fourth
+battery) and carry no clue as to which battery they belong to. That is a legacy
+of cells having once been devices of their own.
+
+### Colours
+
+| Where the cell sits | Colour |
+|---|---|
+| Within the normal band | green, palest at the pack's lowest cell, deepest at its highest |
+| Below `normal_min` (3.0 V) | blue, deepening toward `critical_min` (2.5 V) |
+| Above `normal_max` (3.45 V) | red, deepening toward `critical_max` (3.65 V) |
+
+The green ramp is scaled to the pack's **own** spread, not to the absolute
+band: these cells live inside a 60 mV window, so an absolute scale would render
+a healthy pack as sixteen identical squares and show nothing. A floor of 20 mV
+(`min_spread`) stops a pack balanced to within noise from being drawn at full
+contrast.
+
+Cells outside the normal band are excluded from that ramp and coloured by
+severity instead. Both parts of that are deliberate: including a failed cell in
+the bounds lets it stretch the scale until the healthy fifteen collapse into
+one shade, and scoring a fault by its position in the pack made it *paler* than
+its neighbours -- the pack minimum has, by definition, nothing below it.
+
+The thresholds are defaults for LiFePO4, not values read from the BMS: the
+pack's own alarm setpoints live in a settings frame this integration cannot
+read yet. Override them per card if yours differ:
+
+```yaml
+type: custom:tensite-cell-grid
+device: Battery PA0 08146
+normal_min: 3.0
+normal_max: 3.45
+critical_min: 2.5
+critical_max: 3.65
+min_spread: 0.02
+```
+
+The header shows the pack's power in kW, flanked by arrows pointing up while
+discharging and down while charging -- taken from the BMS's own charging state
+rather than the sign of the current, so it agrees with the *Charging state*
+sensor when the current hovers near zero. Idle hides the arrows. The footer
+rows carry pack voltage and cell imbalance.
+
 ## Why one connection per cluster
 
 The ESP32 gateway accepts **one BLE central at a time**, and connecting to the

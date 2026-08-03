@@ -292,10 +292,20 @@ device: Battery PA0 08146
 ```
 
 `device` is the only required option -- everything else is found on that
-device, which matters because the per-cell entities are named
-`sensor.cell_01_voltage` (with `_2`/`_3`/`_4` for the second, third and fourth
-battery) and carry no clue as to which battery they belong to. That is a legacy
-of cells having once been devices of their own.
+device, and finding by device rather than by name is what makes the card
+immune to entity ids changing under it.
+
+Installations from before 2026-08 have per-cell entities named
+`sensor.cell_01_voltage`, with `_2`/`_3`/`_4` appended for the second, third
+and fourth battery: cells used to be devices of their own, and Home Assistant
+derives an entity id from the device name only at creation. Those ids say
+nothing about which battery they belong to, and the numeric suffix is assigned
+in whatever order the batteries first reported, so it does not survive the
+integration being removed and re-added. Renaming them to
+`sensor.battery_pa0_08146_cell_01_voltage` is worth doing; move the recorder's
+`states_meta.entity_id` and `statistics_meta.statistic_id` rows at the same
+time and ten days of history follows the entity instead of being stranded
+under the old name.
 
 ### Colours
 

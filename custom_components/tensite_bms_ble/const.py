@@ -81,13 +81,20 @@ OBSOLETE_OPTIONS: Final = frozenset({"expected_batteries", "auto_battery_count"}
 #: How often to run a poll that ignores the detected count and waits out the
 #: full listening window.
 #:
-#: This is what makes auto-detection safe. Learning the count from ordinary
-#: polls alone is a trap: the gateway answers its batteries in rotation, so an
-#: early poll easily catches three of four, and if that number then became the
-#: early-exit condition every later poll would stop at three and the fourth
-#: would never be found. A periodic unbounded poll is the escape hatch -- it
-#: cannot exit early, so it sees the whole bank, and it is also the only way a
-#: battery that has been *removed* stops being expected.
+#: This is the poll that establishes the bank size, and it is the only one that
+#: can. Measured over 25 polls: the master's topology frame -- the one carrying
+#: the roster -- arrived on exactly the three that were full scans and on none
+#: of the other twenty-two. The gateway round-robins its frame types, an
+#: ordinary poll exits after about 18 seconds once every battery has sent its
+#: summary and cells, and the roster has not come round by then. In the capture
+#: it appears 18 times against 252 summaries, so it is a rare frame.
+#:
+#: It is therefore not an optional safety net that the roster makes redundant.
+#: Remove it and the roster goes too, expected_batteries never leaves 0, and
+#: every poll waits out the full window forever -- worse than one per hour.
+#:
+#: It is also what lets a battery that has been *added* be discovered, and one
+#: that has been *removed* stop being waited for.
 FULL_SCAN_INTERVAL: Final = 3600.0  # seconds
 
 #: How many polling intervals may pass without data before entities are

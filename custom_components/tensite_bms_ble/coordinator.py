@@ -300,10 +300,9 @@ class TensiteClusterCoordinator(
     def expected_batteries(self) -> int:
         """How many batteries a poll waits for before returning early.
 
-        Whatever the bank says it holds, and nothing else. The master states
-        this outright in its topology frame, so there is nothing to configure
-        and nothing to infer; a full-window poll is only the fallback for when
-        no topology frame has arrived yet.
+        Whatever the bank says it holds, and nothing else -- there is nothing
+        to configure. Both sources of that answer come from the same place: a
+        full-window poll. See detected_batteries and FULL_SCAN_INTERVAL.
 
         0 means "not known yet", which makes a poll wait out the listening
         window rather than exit early.
@@ -314,11 +313,16 @@ class TensiteClusterCoordinator(
     def detected_batteries(self) -> int:
         """What the bank says it holds, 0 if it has not said yet.
 
-        The roster is the master's own statement and wins. The full-window
-        count is the fallback, and is deliberately fed only by polls that could
-        not exit early: an ordinary poll stops as soon as *expected* batteries
-        have reported, so counting its results would just re-measure the exit
-        condition, and any undercount would latch permanently.
+        Two readings of the same poll, not two independent channels. Both are
+        set only by a full-window scan, because that is the only poll long
+        enough to see either -- see FULL_SCAN_INTERVAL.
+
+        The roster wins where they differ. It is a count the master *states*,
+        in a header byte of its topology frame; the other is how many batteries
+        happened to answer. Counting answers on an ordinary poll would be
+        worthless anyway: such a poll stops as soon as *expected* batteries
+        have reported, so the count would just re-measure the exit condition,
+        and any undercount would latch permanently.
         """
         return self._roster_batteries or self._learned_batteries
 

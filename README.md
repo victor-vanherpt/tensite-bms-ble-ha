@@ -59,6 +59,25 @@ the bank is only enumerated once frames start arriving.
 **Cell imbalance** is the one worth an automation — a cell drifting away from
 its pack is the earliest visible sign of a failing cell.
 
+## Battery count
+
+There is nothing to configure. The bank master states how many batteries it
+has, in a header byte of its topology frame, and *Batteries expected* reports
+that. *Batteries reported* is how many answered the most recent poll — below
+expected on a single poll is normal, since the gateway answers its batteries in
+rotation; below expected on every poll is not.
+
+Once an hour a poll ignores that count and waits out the full listening window.
+That poll is what establishes the bank size, and it is the only one that can:
+measured over 25 polls, the topology frame arrived on the three that were full
+scans and on none of the other twenty-two. An ordinary poll exits after about
+18 seconds once every battery has sent its summary and cells, and the roster
+has not come round in the rotation by then — it is a rare frame, appearing 18
+times against 252 summaries in a captured session.
+
+So the hourly poll is not redundant with the roster; it is how the roster is
+obtained. It is also what notices a battery being added or removed.
+
 ## Alarms
 
 The BMS reports 29 named alarms, matching the vendor app's alarm page row for

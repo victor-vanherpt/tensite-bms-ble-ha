@@ -1,7 +1,7 @@
 {
   "domain": "tensite_bms_ble",
   "name": "Tensite BMS (BLE)",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "codeowners": [
     "@victor-vanherpt"
   ],

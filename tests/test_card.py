@@ -224,6 +224,14 @@ class TestColour:
     def test_red_is_still_what_an_over_voltage_cell_mixes_toward(self):
         assert "var(--c-high) calc(var(--over) * 100%)" in self.CSS
 
+    def test_idle_is_drawn_rather_than_hidden(self):
+        """A resting pack should read as resting, not as a card that failed to
+        draw an arrow. The BMS has a 0.3 A deadband, so idle is a real state
+        and not a momentary crossing of zero."""
+        assert "visibility: hidden" not in self.CSS
+        assert '"\u25cf"' in self.CSS or "\u25cf" in self.CSS
+        assert ".power.idle .arrow { color: var(--c-idle)" in self.CSS
+
 
 class TestColumns:
     """How many across, at both levels.

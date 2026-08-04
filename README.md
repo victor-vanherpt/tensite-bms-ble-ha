@@ -401,10 +401,11 @@ ring the highest cell and colour the discharging arrows too, which meant a
 perfectly healthy pack showed red somewhere at all times -- and a colour that is
 always present is a colour the eye stops reading.
 
-The header shows the pack's power in kW, flanked by arrows pointing up while
-discharging and down while charging -- taken from the BMS's own charging state
-rather than the sign of the current, so it agrees with the *Charging state*
-sensor when the current hovers near zero. Idle hides the arrows. The footer
+The header shows the pack's power in kW, flanked by a direction marker: a blue
+▲ while discharging, a yellow ▼ while charging, and a grey ● at rest. It
+follows the BMS's own charging state rather than the sign of the current, which
+matters because that state applies a 0.3 A deadband -- a pack trickling at
+0.1 A reads idle instead of flickering between charging and discharging. The footer
 rows carry pack voltage and cell imbalance.
 
 ## Why one connection per cluster

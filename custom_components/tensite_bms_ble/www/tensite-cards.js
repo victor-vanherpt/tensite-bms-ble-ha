@@ -94,6 +94,8 @@ const STYLE = `
        highest cell is not a fault, and colouring it like one taught the eye to
        ignore the colour that matters. */
     --c-charge: #f9a825;
+    /* Idle. The theme's own muted colour, so it recedes in either scheme. */
+    --c-idle: var(--disabled-text-color, #9e9e9e);
     --wash-min: 0.08;
     --wash-range: 0.5;
     --wash-max: 0.58; /* --wash-min + --wash-range */
@@ -116,7 +118,10 @@ const STYLE = `
      raises it, matching the blue-low / yellow-high marking on the cells. */
   .power.charging .arrow { color: var(--c-charge); }
   .power.discharging .arrow { color: var(--c-low); }
-  .power.idle .arrow { visibility: hidden; }
+  /* Idle is a state worth showing, not an absence: a dot rather than a hidden
+     arrow, so a resting pack reads as resting instead of as a card that failed
+     to draw something. */
+  .power.idle .arrow { color: var(--c-idle); font-size: 0.55em; }
 
   .cell {
     min-width: 0;
@@ -428,16 +433,19 @@ class TensiteCellGrid extends HTMLElement {
   _paintHeader(power, status) {
     const watts = Number(power);
     const kw = Number.isFinite(watts) ? Math.abs(watts) / 1000 : null;
-    // The arrows follow the BMS's own charging state rather than the sign of
-    // the power, so they agree with the Charging state sensor even when the
-    // current is hovering either side of zero.
-    const mode =
-      status === "charging" || status === "discharging"
-        ? status
-        : Number.isFinite(watts) && Math.abs(watts) < 1
-          ? "idle"
-          : status || "idle";
-    const arrow = mode === "discharging" ? "▲" : "▼";
+    // Follows the BMS's own charging state rather than the sign of the power:
+    // it applies a 0.3 A deadband, so a pack trickling at 0.1 A reads idle
+    // instead of flickering between charging and discharging. The power sign
+    // is only a fallback for when that sensor is missing -- current is
+    // positive out of the pack, so positive power is discharging.
+    const mode = ["charging", "discharging", "idle"].includes(status)
+      ? status
+      : !Number.isFinite(watts) || Math.abs(watts) < 1
+        ? "idle"
+        : watts > 0
+          ? "discharging"
+          : "charging";
+    const arrow = mode === "discharging" ? "▲" : mode === "charging" ? "▼" : "●";
     this._root.header.className = `span power ${mode}`;
     for (const el of this._root.header.querySelectorAll(".arrow")) el.textContent = arrow;
     this._root.header.querySelector(".kw").textContent =

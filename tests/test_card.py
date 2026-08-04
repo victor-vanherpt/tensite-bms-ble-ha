@@ -89,10 +89,14 @@ function mount(tag, config) {
 }
 
 const tight = mount("tensite-cell-grid", { device: "Battery PA0 tight" });
+const fourAcross = mount("tensite-cell-grid", { device: "Battery PA0 tight", columns: 4 });
 const wide = mount("tensite-cell-grid", { device: "Battery P01 wide" });
 const own = mount("tensite-cell-grid", { device: "Battery PA0 tight", scale: "battery" });
 madeCells.length = 0;
-mount("tensite-cluster-grid", { device: "Cluster One" });
+const cluster = mount("tensite-cluster-grid", { device: "Cluster One", cell_columns: 4 });
+const forwarded = madeCells[0].config.columns;
+madeCells.length = 0;
+const capped = mount("tensite-cluster-grid", { device: "Cluster One", columns: 1 });
 
 const scale = (m) => ({ lo: Number(m.grid.props["--lo"]),
                         spread: Number((1 / Number(m.grid.props["--inv-spread"])).toFixed(4)),
@@ -104,9 +108,16 @@ console.log(JSON.stringify({
   tight: scale(tight),
   wide: scale(wide),
   own_scale: scale(own),
+  cell_columns_default: tight.grid.props["--columns"],
+  cell_columns_set: fourAcross.grid.props["--columns"],
+  cell_columns_forwarded: forwarded,
+  banks_default: cluster.grid.props["grid-template-columns"],
+  banks_capped: capped.grid.props["grid-template-columns"],
   cluster_children: madeCells.map((c) => ({ device: c.config.device,
                                             title: c.config.title,
-                                            embedded: c.config.embedded })),
+                                            embedded: c.config.embedded,
+                                            columns: c.config.columns,
+                                            cell_columns: c.config.cell_columns })),
   cluster_got_hass: madeCells.every((c) => c.hass === hass),
 }));
 """
@@ -184,3 +195,38 @@ class TestClusterCard:
 
     def test_children_receive_hass(self, run):
         assert run["cluster_got_hass"] is True
+
+
+class TestColumns:
+    """How many across, at both levels.
+
+    The two `columns` mean different things -- batteries on the cluster card,
+    cells on a grid -- so the cluster card must not pass its own down.
+    """
+
+    def test_cells_default_to_the_wiring(self, run):
+        """Two strings of eight is how the pack is physically built."""
+        assert str(run["cell_columns_default"]) == "2"
+
+    def test_cells_can_be_configured(self, run):
+        assert str(run["cell_columns_set"]) == "4"
+
+    def test_the_cluster_column_count_is_not_mistaken_for_cells(self, run):
+        """`columns: 1` on the cluster means one battery across, and must not
+        leave the grids one cell wide.
+
+        Absence rather than None: the key is dropped from the child's config
+        entirely, so the grid falls back to its own default of 2.
+        """
+        assert all("columns" not in c for c in run["cluster_children"])
+
+    def test_cell_columns_is_forwarded_as_the_childs_columns(self, run):
+        """The only way to reach the child's `columns` from up here."""
+        assert run["cell_columns_forwarded"] == 4
+
+    def test_batteries_fill_the_width_but_never_exceed_the_bank(self, run):
+        """A share of the container as the floor is what caps the count: at
+        100%/2 no third column fits, and a narrow card still drops to one."""
+        assert "repeat(auto-fit" in run["banks_default"]
+        assert "/ 2)" in run["banks_default"], run["banks_default"]
+        assert "/ 1)" in run["banks_capped"], run["banks_capped"]

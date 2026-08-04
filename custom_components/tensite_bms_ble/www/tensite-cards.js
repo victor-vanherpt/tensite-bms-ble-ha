@@ -40,9 +40,10 @@
  *   type: custom:tensite-cell-grid
  *   device: Battery PA0 08146     # device name or id; everything is found on it
  *
- * Optional: title, cells_per_column, normal_min, normal_max, critical_min,
- * critical_max, min_spread, and explicit power/voltage/imbalance/status
- * entity overrides when auto-detection picks the wrong one.
+ * Optional: title, columns (cells across, default 2 -- the pack is wired in
+ * two strings of eight), normal_min, normal_max, critical_min, critical_max,
+ * min_spread, scale, and explicit power/voltage/imbalance/status entity
+ * overrides when auto-detection picks the wrong one.
  */
 
 const DEFAULTS = {
@@ -56,7 +57,9 @@ const DEFAULTS = {
   // to within a millivolt of noise would show full contrast across the grid
   // and look alarming.
   min_spread: 0.02,
-  cells_per_column: 8,
+  // Cells across. Two by default because that is how the pack is physically
+  // wired: sixteen cells in two strings of eight.
+  columns: 2,
 };
 
 const STYLE = `
@@ -75,6 +78,10 @@ const STYLE = `
     display: grid;
     grid-template-columns: repeat(var(--columns, 2), 1fr);
     gap: 6px;
+    /* So the rules below can measure this grid rather than the viewport: four
+       batteries side by side each get a quarter of the card, and a cell then
+       has to fit in an eighth of it. */
+    container-type: inline-size;
 
     /* Palette. Hues only -- how much of each is applied is decided per cell
        below, so these stay constant while the pack moves. */
@@ -104,6 +111,7 @@ const STYLE = `
   .power.idle .arrow { visibility: hidden; }
 
   .cell {
+    min-width: 0;
     /* Everything below is derived from --v, the cell's raw voltage, plus the
        pack bounds and thresholds set on .grid. No JavaScript involved. */
     --bal: clamp(0, calc((var(--v) - var(--lo)) * var(--inv-spread)), 1);
@@ -150,6 +158,21 @@ const STYLE = `
   .cell .value {
     font-size: 1.05em;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Squeezed: drop the padding first, then the cell number, then the size.
+     The voltage is the thing worth keeping legible. */
+  @container (max-width: 240px) {
+    .cell { padding: 6px 7px; min-height: 30px; }
+    .power { font-size: 1.5em; }
+  }
+  @container (max-width: 190px) {
+    .cell .index { display: none; }
+    .cell { justify-content: center; }
+    .cell .value { font-size: 0.95em; }
+    .power { font-size: 1.25em; gap: 6px; }
+    .foot .label { font-size: 0.85em; }
   }
   .cell.highest { border-color: var(--c-high); border-style: dashed; }
   .cell.lowest { border-color: var(--c-low); border-style: dashed; }
@@ -194,7 +217,7 @@ class TensiteCellGrid extends HTMLElement {
   }
 
   getCardSize() {
-    return Math.ceil(this._config.cells_per_column / 2) + 3;
+    return Math.ceil(16 / this._config.columns / 2) + 3;
   }
 
   /**
@@ -277,7 +300,10 @@ class TensiteCellGrid extends HTMLElement {
     const grid = root.querySelector(".grid");
 
     const c = this._config;
-    grid.style.setProperty("--columns", Math.ceil(resolved.cells.length / c.cells_per_column));
+    grid.style.setProperty(
+      "--columns",
+      Math.min(Math.max(1, Math.round(c.columns) || 1), resolved.cells.length)
+    );
     grid.style.setProperty("--n-lo", c.normal_min);
     grid.style.setProperty("--n-hi", c.normal_max);
     // Reciprocals rather than the spans themselves: see the file header.
@@ -432,6 +458,15 @@ class TensiteCellGrid extends HTMLElement {
  *
  *   type: custom:tensite-cluster-grid
  *   device: TS-L5000-8146      # the cluster; optional if there is only one
+ *   columns: 4                 # batteries across; default is all of them
+ *   cell_columns: 2            # passed to each grid as its `columns`
+ *
+ * `columns` is a maximum, not a fixed count: the batteries fill the width they
+ * are given and wrap when there is not enough for another, down to a single
+ * column on a phone. Note that in a dashboard *sections* view a card is
+ * confined to one section column unless it is given `grid_options: {columns:
+ * full}`, and four batteries in 430 px will wrap however this card is
+ * configured.
  */
 const CLUSTER_STYLE = `
   :host { display: block; }
@@ -443,19 +478,40 @@ const CLUSTER_STYLE = `
   }
   .banks {
     display: grid;
-    /* Batteries side by side where there is room, stacked where there is not.
-       auto-fit rather than a fixed count: a bank can hold up to eight. */
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    /* Set from JavaScript, which knows how many batteries there are. See
+       _columnRule: as many side by side as fit, never more than the bank
+       holds, down to one on a phone. */
     gap: 16px;
   }
   .warning { padding: 16px; }
 `;
+
+//: Narrower than this and a battery is not worth drawing, so it wraps instead.
+//: Two 2-column cell grids fit either side of it on a phone in landscape.
+const BANK_MIN_WIDTH = 150;
+const BANK_GAP = 16;
 
 class TensiteClusterGrid extends HTMLElement {
   setConfig(config) {
     this._config = { ...config };
     this._children = null;
     this._resolved = null;
+  }
+
+  /**
+   * Lay out *count* batteries across, responsively.
+   *
+   * `repeat(auto-fit, minmax(150px, 1fr))` alone wraps as soon as the card is
+   * narrower than 150px per battery, which in a dashboard *section* -- about
+   * 430px wide -- means four batteries come out two by two with the rest of
+   * the screen empty. Raising the floor to a share of the container instead
+   * caps the count: at 100%/4 no fifth column can ever fit, and when the card
+   * is too narrow for four at 150px each it drops to three, then two, then
+   * one. So it fills the width it is given and still stacks on a phone.
+   */
+  _columnRule(count) {
+    const share = `calc((100% - ${(count - 1) * BANK_GAP}px) / ${count})`;
+    return `repeat(auto-fit, minmax(max(${BANK_MIN_WIDTH}px, ${share}), 1fr))`;
   }
 
   set hass(hass) {
@@ -542,16 +598,28 @@ class TensiteClusterGrid extends HTMLElement {
       root.innerHTML = `<style>${CLUSTER_STYLE}</style><ha-card>${title}<div class="banks"></div></ha-card>`;
       const banks = root.querySelector(".banks");
 
+      // `columns` here means batteries across, never more than there are.
+      const across = Math.min(
+        Math.max(1, Math.round(this._config.columns) || resolved.batteries.length),
+        resolved.batteries.length
+      );
+      banks.style.setProperty("grid-template-columns", this._columnRule(across));
+
       this._children = resolved.batteries.map((device) => {
         const card = document.createElement("tensite-cell-grid");
         // Same options the user set here, so thresholds configured once on the
-        // cluster apply to every battery in it.
+        // cluster apply to every battery in it -- except the two that mean
+        // different things at each level. `columns` is batteries across here
+        // and cells across there, so it is dropped and `cell_columns` carries
+        // the intent instead.
+        const child = { ...this._config, device: device.id, embedded: true };
+        delete child.type;
+        delete child.columns;
+        delete child.cell_columns;
+        if (this._config.cell_columns) child.columns = this._config.cell_columns;
         card.setConfig({
-          ...this._config,
-          type: undefined,
-          device: device.id,
+          ...child,
           title: device.name_by_user || device.name,
-          embedded: true,
         });
         banks.appendChild(card);
         return card;

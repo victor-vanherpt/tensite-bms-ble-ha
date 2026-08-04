@@ -257,12 +257,37 @@ bank side by side on one shared colour scale.
 ```yaml
 type: custom:tensite-cluster-grid
 device: TS-L5000-8146       # the cluster; omit it if you only have one
+grid_options:
+  columns: full             # see below -- without this they will wrap
 ```
 
 The cluster card builds a cell grid per battery rather than reimplementing one,
-so everything below applies to both. Batteries are laid out side by side where
-there is room and stacked where there is not, master first -- position `PA0`,
-the one relaying for the rest.
+so everything below applies to both. Batteries are laid out side by side,
+master first -- position `PA0`, the one relaying for the rest.
+
+### Width
+
+**In a *sections* view, give the card `grid_options: {columns: full}`.** A card
+there is confined to one section column, about 430 px, and four batteries in
+430 px wrap two by two with the rest of the screen empty however the card is
+configured. The generated `dashboard.yaml` sets this already.
+
+Given room, batteries fill the width and wrap only when there is not enough for
+another, down to a single column on a phone. `columns:` caps how many sit side
+by side; the default is all of them:
+
+| Option | Meaning | Default |
+|---|---|---|
+| `columns` on the cluster card | batteries across, as a maximum | all of them |
+| `cell_columns` on the cluster card | passed to each grid as its `columns` | 2 |
+| `columns` on a cell grid | cells across | 2, the two strings of eight the pack is wired in |
+
+The two `columns` mean different things, so the cluster card does not pass its
+own down -- `cell_columns` is how you reach the grids from up there.
+
+Cells shrink gracefully when squeezed: padding goes first, then the cell
+number, then the type size. The voltage stays legible longest, because it is
+the thing worth reading.
 
 Cells are shaded by where each sits relative to the rest of the bank, with each
 battery's own highest and lowest ringed in dashed red and blue.

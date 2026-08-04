@@ -290,10 +290,10 @@ number, then the type size. The voltage stays legible longest, because it is
 the thing worth reading.
 
 Cells are shaded by where each sits relative to the rest of the bank, with each
-battery's own highest and lowest ringed in dashed red and blue.
+battery's own highest and lowest ringed in dashed yellow and blue.
 
 ```
-        ▲   1.24 kW   ▲          ← up while discharging, down while charging
+        ▲   1.24 kW   ▲          ← up/blue discharging, down/yellow charging
   ┌───────────┬───────────┐
   │ 01  3.282 │ 02  3.290 │      ← green shaded by position within the pack
   │ 03  3.288 │ 04  3.288 │
@@ -393,6 +393,13 @@ min_spread: 0.02
 The dashed borders stay per battery even though the colours are shared: each
 card points at its own weakest and strongest cell, which is what you want when
 looking at one pack, while the shading is what you compare across packs.
+
+Blue means down and yellow means up, throughout: blue rings the lowest cell and
+tints the arrows while discharging, yellow rings the highest and tints them
+while charging. **Red is reserved for a cell outside its safe band.** It used to
+ring the highest cell and colour the discharging arrows too, which meant a
+perfectly healthy pack showed red somewhere at all times -- and a colour that is
+always present is a colour the eye stops reading.
 
 The header shows the pack's power in kW, flanked by arrows pointing up while
 discharging and down while charging -- taken from the BMS's own charging state

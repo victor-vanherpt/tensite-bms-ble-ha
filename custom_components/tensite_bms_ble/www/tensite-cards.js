@@ -28,8 +28,9 @@
  *     an absolute scale would render a healthy pack as sixteen identical
  *     squares, since these cells live inside a 60 mV window
  *   - below normal_min, mixed toward blue; above normal_max, toward red
- *   - the extremes get a dashed border, red for the highest, blue for the
- *     lowest
+ *   - the extremes get a dashed border, yellow for the highest and blue for
+ *     the lowest, leaving red to mean a cell outside its safe band and
+ *     nothing else
  *
  * The tint is applied as a translucent wash over the card background rather
  * than an opaque fill, which keeps the theme's own text colour readable in
@@ -88,6 +89,11 @@ const STYLE = `
     --c-ok: #43a047;
     --c-low: #1e88e5;
     --c-high: #e53935;
+    /* Current direction and the pack's own extremes, kept apart from --c-high
+       so red means one thing only: a cell outside its safe band. A pack's
+       highest cell is not a fault, and colouring it like one taught the eye to
+       ignore the colour that matters. */
+    --c-charge: #f9a825;
     --wash-min: 0.08;
     --wash-range: 0.5;
     --wash-max: 0.58; /* --wash-min + --wash-range */
@@ -106,8 +112,10 @@ const STYLE = `
     letter-spacing: 0.02em;
   }
   .power .arrow { font-size: 0.8em; opacity: 0.75; }
-  .power.charging .arrow { color: var(--c-low); }
-  .power.discharging .arrow { color: var(--c-high); }
+  /* Blue out, yellow in: discharging lowers the pack voltage, charging
+     raises it, matching the blue-low / yellow-high marking on the cells. */
+  .power.charging .arrow { color: var(--c-charge); }
+  .power.discharging .arrow { color: var(--c-low); }
   .power.idle .arrow { visibility: hidden; }
 
   .cell {
@@ -174,7 +182,7 @@ const STYLE = `
     .power { font-size: 1.25em; gap: 6px; }
     .foot .label { font-size: 0.85em; }
   }
-  .cell.highest { border-color: var(--c-high); border-style: dashed; }
+  .cell.highest { border-color: var(--c-charge); border-style: dashed; }
   .cell.lowest { border-color: var(--c-low); border-style: dashed; }
   .cell.stale { opacity: 0.35; }
 

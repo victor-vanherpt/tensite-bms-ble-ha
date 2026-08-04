@@ -197,6 +197,34 @@ class TestClusterCard:
         assert run["cluster_got_hass"] is True
 
 
+class TestColour:
+    """Red is reserved for a cell outside its safe band.
+
+    It used to also ring the pack's highest cell and colour the discharging
+    arrows, so most healthy packs showed red somewhere at all times -- which
+    teaches the eye to ignore the one colour that should mean something.
+    Direction and extremes now use blue for down and yellow for up.
+    """
+
+    CSS = None
+
+    @pytest.fixture(autouse=True)
+    def css(self):
+        TestColour.CSS = CARD.read_text()
+
+    def test_the_highest_cell_is_not_marked_in_the_fault_colour(self):
+        assert ".cell.highest { border-color: var(--c-charge)" in self.CSS
+        assert ".cell.lowest { border-color: var(--c-low)" in self.CSS
+
+    def test_discharging_is_blue_and_charging_yellow(self):
+        """Blue out: discharging lowers the pack voltage."""
+        assert ".power.discharging .arrow { color: var(--c-low); }" in self.CSS
+        assert ".power.charging .arrow { color: var(--c-charge); }" in self.CSS
+
+    def test_red_is_still_what_an_over_voltage_cell_mixes_toward(self):
+        assert "var(--c-high) calc(var(--over) * 100%)" in self.CSS
+
+
 class TestColumns:
     """How many across, at both levels.
 

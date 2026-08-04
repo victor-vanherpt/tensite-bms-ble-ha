@@ -118,10 +118,12 @@ const STYLE = `
      raises it, matching the blue-low / yellow-high marking on the cells. */
   .power.charging .arrow { color: var(--c-charge); }
   .power.discharging .arrow { color: var(--c-low); }
-  /* Idle is a state worth showing, not an absence: a dot rather than a hidden
-     arrow, so a resting pack reads as resting instead of as a card that failed
-     to draw something. */
-  .power.idle .arrow { color: var(--c-idle); font-size: 0.55em; }
+  /* Idle is a state worth *noticing*, not an absence. A pack in a solar bank
+     should be charging or discharging; sitting at zero while its siblings work
+     is the anomaly you want to catch from across the room. So the dot is not
+     shrunk or dimmed the way the arrows are -- it is full size and full
+     opacity, and the only grey thing on the card. */
+  .power.idle .arrow { color: var(--c-idle); font-size: 1em; opacity: 1; }
 
   .cell {
     min-width: 0;

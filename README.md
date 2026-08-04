@@ -402,10 +402,17 @@ perfectly healthy pack showed red somewhere at all times -- and a colour that is
 always present is a colour the eye stops reading.
 
 The header shows the pack's power in kW, flanked by a direction marker: a blue
-▲ while discharging, a yellow ▼ while charging, and a grey ● at rest. It
-follows the BMS's own charging state rather than the sign of the current, which
-matters because that state applies a 0.3 A deadband -- a pack trickling at
-0.1 A reads idle instead of flickering between charging and discharging. The footer
+▲ while discharging, a yellow ▼ while charging, and a grey ● at rest.
+
+The dot is drawn full size and full opacity while the arrows are shrunk and
+dimmed, which is the opposite of what "resting" would suggest -- deliberately.
+A pack in a solar bank should be charging or discharging; one sitting at zero
+while its siblings work is the anomaly worth catching from across the room, and
+grey is then the only unusual colour on the card.
+
+The state follows the BMS rather than the sign of the current, which matters
+because it applies a 0.3 A deadband -- a pack trickling at 0.1 A reads idle
+instead of flickering between charging and discharging. The footer
 rows carry pack voltage and cell imbalance.
 
 ## Why one connection per cluster

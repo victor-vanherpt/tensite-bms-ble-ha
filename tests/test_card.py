@@ -225,12 +225,18 @@ class TestColour:
         assert "var(--c-high) calc(var(--over) * 100%)" in self.CSS
 
     def test_idle_is_drawn_rather_than_hidden(self):
-        """A resting pack should read as resting, not as a card that failed to
-        draw an arrow. The BMS has a 0.3 A deadband, so idle is a real state
-        and not a momentary crossing of zero."""
+        """The BMS has a 0.3 A deadband, so idle is a real state and not a
+        momentary crossing of zero."""
         assert "visibility: hidden" not in self.CSS
-        assert '"\u25cf"' in self.CSS or "\u25cf" in self.CSS
+        assert "\u25cf" in self.CSS
         assert ".power.idle .arrow { color: var(--c-idle)" in self.CSS
+
+    def test_idle_is_not_drawn_more_quietly_than_the_arrows(self):
+        """A pack in a solar bank should be charging or discharging. Sitting at
+        zero while its siblings work is the anomaly worth catching, so it must
+        not inherit the arrows' reduced size and opacity."""
+        assert ".power .arrow { font-size: 0.8em; opacity: 0.75; }" in self.CSS
+        assert "font-size: 1em; opacity: 1;" in self.CSS
 
 
 class TestColumns:

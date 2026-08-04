@@ -248,11 +248,24 @@ Entity ids are installation specific, so regenerate after adding a battery:
 uv run --with pyyaml python tools/make_dashboard.py root@homeassistant > dashboard.yaml
 ```
 
-## Cell grid card
+## Cell grid cards
 
-A Lovelace card showing one battery's sixteen cells as a 2x8 grid, shaded by
-where each cell sits relative to the rest of its pack, with the highest and
-lowest ringed in dashed red and blue.
+Two cards ship with the integration: `tensite-cell-grid` shows one battery's
+sixteen cells as a 2x8 grid, and `tensite-cluster-grid` puts every battery in a
+bank side by side on one shared colour scale.
+
+```yaml
+type: custom:tensite-cluster-grid
+device: TS-L5000-8146       # the cluster; omit it if you only have one
+```
+
+The cluster card builds a cell grid per battery rather than reimplementing one,
+so everything below applies to both. Batteries are laid out side by side where
+there is room and stacked where there is not, master first -- position `PA0`,
+the one relaying for the rest.
+
+Cells are shaded by where each sits relative to the rest of the bank, with each
+battery's own highest and lowest ringed in dashed red and blue.
 
 ```
         ▲   1.24 kW   ▲          ← up while discharging, down while charging
@@ -316,11 +329,21 @@ under the old name.
 | Below `normal_min` (3.0 V) | blue, deepening toward `critical_min` (2.5 V) |
 | Above `normal_max` (3.45 V) | red, deepening toward `critical_max` (3.65 V) |
 
-The green ramp is scaled to the pack's **own** spread, not to the absolute
-band: these cells live inside a 60 mV window, so an absolute scale would render
-a healthy pack as sixteen identical squares and show nothing. A floor of 20 mV
-(`min_spread`) stops a pack balanced to within noise from being drawn at full
-contrast.
+The green ramp is scaled to the **bank's** spread, not to the absolute band and
+not to each battery separately.
+
+Not absolute, because these cells live inside a 60 mV window: an absolute scale
+would render a healthy pack as sixteen identical squares and show nothing. Not
+per battery, because then every card would use its full green range and a pack
+balanced to 2 mV would look exactly like one spread over 150 mV -- glancing
+between them would say nothing. Sharing one scale is what makes the comparison
+mean something, and it needs no wiring between the cards: each one works out
+the same bounds from its own cluster, so a standalone grid on a battery page
+shades identically to the same battery inside the cluster card. Set
+`scale: battery` to opt a card out.
+
+A floor of 20 mV (`min_spread`) stops a bank balanced to within noise from
+being drawn at full contrast.
 
 Cells outside the normal band are excluded from that ramp and coloured by
 severity instead. Both parts of that are deliberate: including a failed cell in
@@ -341,6 +364,10 @@ critical_min: 2.5
 critical_max: 3.65
 min_spread: 0.02
 ```
+
+The dashed borders stay per battery even though the colours are shared: each
+card points at its own weakest and strongest cell, which is what you want when
+looking at one pack, while the shading is what you compare across packs.
 
 The header shows the pack's power in kW, flanked by arrows pointing up while
 discharging and down while charging -- taken from the BMS's own charging state

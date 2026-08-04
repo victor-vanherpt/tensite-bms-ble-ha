@@ -11,9 +11,15 @@ MODEL_CLUSTER: Final = "Battery cluster"
 MODEL_BATTERY: Final = "TS-L5000"
 MODEL_CELL: Final = "LiFePO4 cell"
 
-#: The Lovelace card shipped with the integration -- see _async_register_card.
-CARD_FILENAME: Final = "tensite-cell-grid.js"
-CARD_URL: Final = f"/{DOMAIN}/{CARD_FILENAME}"
+#: The Lovelace cards shipped with the integration -- see _async_register_card.
+#: One file defines both the per-battery grid and the cluster card, so they
+#: cannot be installed at different versions.
+CARD_FILENAME: Final = "tensite-cards.js"
+#: Everything this integration serves. Resources are matched on the prefix, not
+#: the full URL, so renaming the file updates the existing resource instead of
+#: leaving a dead one behind next to the new one.
+CARD_URL_PREFIX: Final = f"/{DOMAIN}/"
+CARD_URL: Final = f"{CARD_URL_PREFIX}{CARD_FILENAME}"
 #: hass.data flag: the card is registered once per Home Assistant run, not once
 #: per config entry, since a second bank would re-register the same path.
 CARD_REGISTERED: Final = f"{DOMAIN}_card_registered"

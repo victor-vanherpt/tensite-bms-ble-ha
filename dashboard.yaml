@@ -12,6 +12,10 @@ views:
   sections:
   - type: grid
     cards:
+    - type: custom:tensite-cluster-grid
+      device: TS-L5000-8146
+  - type: grid
+    cards:
     - type: entities
       title: Overview
       entities:

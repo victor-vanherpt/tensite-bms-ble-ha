@@ -19,6 +19,7 @@ from .const import (
     CARD_FILENAME,
     CARD_REGISTERED,
     CARD_URL,
+    CARD_URL_PREFIX,
     CONF_ADDRESS,
     CONF_HIDE_SENTINEL_TEMPERATURES,
     CONF_MEMBER_SERIALS,
@@ -117,18 +118,23 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         resources = lovelace.resources
         # The collection is loaded lazily; async_get_info is what forces it.
         await resources.async_get_info()
-        existing = next(
-            (r for r in resources.async_items() if r["url"].startswith(CARD_URL)),
-            None,
-        )
-        if existing is None:
+        ours = [
+            r
+            for r in resources.async_items()
+            if r["url"].startswith(CARD_URL_PREFIX)
+        ]
+        if not ours:
             await resources.async_create_item({"res_type": "module", "url": url})
-            _LOGGER.info("Registered the cell grid card as a Lovelace resource")
-        elif existing["url"] != url:
-            # Carries the integration version, so an upgrade rewrites it and
-            # browsers fetch the new card instead of the cached old one.
-            await resources.async_update_item(existing["id"], {"url": url})
-            _LOGGER.debug("Updated the card resource to %s", url)
+            _LOGGER.info("Registered the Tensite cards as a Lovelace resource")
+        else:
+            # Matched on the prefix, so a renamed or re-versioned file updates
+            # the entry rather than adding a second one that 404s forever.
+            if ours[0]["url"] != url:
+                await resources.async_update_item(ours[0]["id"], {"url": url})
+                _LOGGER.info("Updated the Tensite card resource to %s", url)
+            for stale in ours[1:]:
+                await resources.async_delete_item(stale["id"])
+                _LOGGER.info("Removed a duplicate card resource: %s", stale["url"])
         return
 
     if "frontend" not in hass.config.components:

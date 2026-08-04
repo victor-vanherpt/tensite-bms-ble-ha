@@ -1,4 +1,12 @@
 /**
+ * Lovelace cards for Tensite battery banks.
+ *
+ *   tensite-cell-grid     one battery's cells as a 2x8 grid
+ *   tensite-cluster-grid  every battery in a bank, side by side
+ *
+ * Both in one file so they cannot be installed at different versions, and
+ * because the cluster card is little more than a layout around the other.
+ *
  * tensite-cell-grid -- a 2x8 cell voltage grid for one battery.
  *
  * Why a card rather than a stack of templates: colouring sixteen cells by
@@ -54,6 +62,14 @@ const DEFAULTS = {
 const STYLE = `
   :host { display: block; }
   ha-card { padding: 12px; }
+  .bare { padding: 0; }
+
+  .title {
+    font-size: 0.95em;
+    font-weight: 500;
+    opacity: 0.8;
+    padding: 0 2px 8px;
+  }
 
   .grid {
     display: grid;
@@ -209,6 +225,26 @@ class TensiteCellGrid extends HTMLElement {
     cells.sort((a, b) => a.index - b.index);
     if (!cells.length) return { error: `No cell voltage entities on "${wanted}"` };
 
+    // Cells to shade *against*. By default every cell in the cluster, not just
+    // this battery's: a per-battery scale makes each card use its full green
+    // range, so a pack balanced to 3 mV looks exactly like one spread over
+    // 60 mV and two cards side by side cannot be compared at all. Sharing one
+    // scale is what makes a glance across the bank mean something.
+    const siblings =
+      this._config.scale === "battery" || !device.via_device_id
+        ? [device]
+        : Object.values(hass.devices).filter(
+            (d) => d.via_device_id === device.via_device_id
+          );
+    const siblingIds = new Set(siblings.map((d) => d.id));
+    const scale_cells = Object.values(hass.entities || {})
+      .filter(
+        (e) =>
+          siblingIds.has(e.device_id) &&
+          /cell_(\d+)_voltage(_\d+)?$/.test(e.entity_id)
+      )
+      .map((e) => e.entity_id);
+
     // Suffix matching is safe now that the search is confined to one device.
     const pick = (test) => {
       const found = mine.find((e) => e.entity_id.startsWith("sensor.") && test(e.entity_id));
@@ -216,6 +252,7 @@ class TensiteCellGrid extends HTMLElement {
     };
     return {
       cells,
+      scale_cells,
       power: this._config.power || pick((id) => id.endsWith("_power")),
       voltage:
         this._config.voltage ||
@@ -228,7 +265,15 @@ class TensiteCellGrid extends HTMLElement {
 
   _build(resolved) {
     const root = this.attachShadow ? this.shadowRoot || this.attachShadow({ mode: "open" }) : this;
-    root.innerHTML = `<style>${STYLE}</style><ha-card><div class="grid"></div></ha-card>`;
+    const title = this._config.title
+      ? `<div class="title">${this._config.title}</div>`
+      : "";
+    // Embedded means "no card chrome": the cluster card draws one ha-card and
+    // puts several of these inside it, and nesting ha-cards gives every
+    // battery its own border and shadow inside another border and shadow.
+    root.innerHTML = this._config.embedded
+      ? `<style>${STYLE}</style><div class="bare">${title}<div class="grid"></div></div>`
+      : `<style>${STYLE}</style><ha-card>${title}<div class="grid"></div></ha-card>`;
     const grid = root.querySelector(".grid");
 
     const c = this._config;
@@ -285,8 +330,12 @@ class TensiteCellGrid extends HTMLElement {
     // ours. Touching the DOM each time would mean thousands of pointless
     // writes an hour, so compare first and bail when nothing we show moved.
     const values = r.cells.map((c) => state(c.entity_id));
+    const scaleValues = r.scale_cells.map(state);
     const signature = [
       ...values,
+      // Included because the shading scale is the cluster's: a cell moving on
+      // another battery changes what the colours here mean.
+      ...scaleValues,
       state(r.power),
       state(r.voltage),
       state(r.imbalance),
@@ -295,23 +344,24 @@ class TensiteCellGrid extends HTMLElement {
     if (signature === this._signature) return;
     this._signature = signature;
 
-    this._paintCells(values);
+    this._paintCells(values, scaleValues);
     this._paintHeader(state(r.power), state(r.status));
     this._paintFoot(state(r.voltage), state(r.imbalance));
   }
 
-  _paintCells(values) {
+  _paintCells(values, scaleValues) {
     const numbers = values.map(Number).filter((v) => Number.isFinite(v));
+    const scaleNumbers = scaleValues.map(Number).filter((v) => Number.isFinite(v));
     // The green ramp describes the *healthy* population, so cells outside the
     // normal band are left out of its bounds. Including them lets a single
     // failing cell stretch the scale so far that the remaining fifteen
     // collapse into one indistinguishable shade -- exactly when reading the
     // balance of the rest matters most. Out-of-band cells are coloured by
     // severity instead and need no place on this scale.
-    const inBand = numbers.filter(
+    const inBand = scaleNumbers.filter(
       (v) => v >= this._config.normal_min && v <= this._config.normal_max
     );
-    const scale = inBand.length ? inBand : numbers;
+    const scale = inBand.length ? inBand : scaleNumbers.length ? scaleNumbers : numbers;
     const scaleLo = scale.length ? Math.min(...scale) : 0;
     const scaleHi = scale.length ? Math.max(...scale) : 0;
     const spread = Math.max(scaleHi - scaleLo, this._config.min_spread);
@@ -372,15 +422,164 @@ class TensiteCellGrid extends HTMLElement {
   }
 }
 
+/**
+ * tensite-cluster-grid -- every battery in one bank, side by side.
+ *
+ * Builds a cell grid per battery rather than reimplementing one. The children
+ * each derive their own colour scale from the whole cluster, so nothing has to
+ * be passed between them and a standalone grid on another view shades
+ * identically.
+ *
+ *   type: custom:tensite-cluster-grid
+ *   device: TS-L5000-8146      # the cluster; optional if there is only one
+ */
+const CLUSTER_STYLE = `
+  :host { display: block; }
+  ha-card { padding: 12px; }
+  .title {
+    font-size: 1.05em;
+    font-weight: 500;
+    padding: 2px 2px 10px;
+  }
+  .banks {
+    display: grid;
+    /* Batteries side by side where there is room, stacked where there is not.
+       auto-fit rather than a fixed count: a bank can hold up to eight. */
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 16px;
+  }
+  .warning { padding: 16px; }
+`;
+
+class TensiteClusterGrid extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._children = null;
+    this._resolved = null;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  getCardSize() {
+    return 8;
+  }
+
+  /** The cluster device and its batteries, in bank order. */
+  _resolve() {
+    const devices = Object.values(this._hass.devices || {});
+    const entities = Object.values(this._hass.entities || {});
+
+    const hasCells = new Set(
+      entities
+        .filter((e) => /cell_\d+_voltage(_\d+)?$/.test(e.entity_id))
+        .map((e) => e.device_id)
+    );
+    const batteries = devices.filter((d) => hasCells.has(d.id));
+
+    let cluster;
+    if (this._config.device) {
+      const wanted = this._config.device;
+      cluster = devices.find(
+        (d) => d.id === wanted || d.name_by_user === wanted || d.name === wanted
+      );
+      if (!cluster) return { error: `No device named "${wanted}"` };
+    } else {
+      // Identified by being the gateway a battery hangs off, rather than by
+      // its model string: one fact about the device tree beats a name that
+      // could be translated or renamed.
+      const clusterIds = [...new Set(batteries.map((d) => d.via_device_id))].filter(
+        Boolean
+      );
+      if (clusterIds.length !== 1) {
+        return {
+          error: clusterIds.length
+            ? "More than one cluster here -- name one with `device:`"
+            : "No battery cluster found",
+        };
+      }
+      cluster = devices.find((d) => d.id === clusterIds[0]);
+    }
+
+    const mine = batteries.filter((d) => d.via_device_id === cluster.id);
+    if (!mine.length) return { error: `No batteries on "${this._config.device}"` };
+
+    // Master first, then by name. Its position label is PA0 -- cluster A,
+    // position 0 -- and it is the one relaying for the rest, so it is the one
+    // to look at first.
+    const name = (d) => d.name_by_user || d.name || "";
+    mine.sort((a, b) => {
+      const master = (d) => (/\bPA\d/.test(name(d)) ? 0 : 1);
+      return master(a) - master(b) || name(a).localeCompare(name(b));
+    });
+    return { cluster, batteries: mine };
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+
+    if (!this._children) {
+      const resolved = this._resolve();
+      const root = this.attachShadow
+        ? this.shadowRoot || this.attachShadow({ mode: "open" })
+        : this;
+      if (resolved.error) {
+        root.innerHTML = `<ha-card><div style="padding:16px">${resolved.error}</div></ha-card>`;
+        return; // Retried on the next state change; devices may still be loading.
+      }
+      this._resolved = resolved;
+
+      const title =
+        this._config.title === false
+          ? ""
+          : `<div class="title">${
+              this._config.title ||
+              resolved.cluster.name_by_user ||
+              resolved.cluster.name
+            }</div>`;
+      root.innerHTML = `<style>${CLUSTER_STYLE}</style><ha-card>${title}<div class="banks"></div></ha-card>`;
+      const banks = root.querySelector(".banks");
+
+      this._children = resolved.batteries.map((device) => {
+        const card = document.createElement("tensite-cell-grid");
+        // Same options the user set here, so thresholds configured once on the
+        // cluster apply to every battery in it.
+        card.setConfig({
+          ...this._config,
+          type: undefined,
+          device: device.id,
+          title: device.name_by_user || device.name,
+          embedded: true,
+        });
+        banks.appendChild(card);
+        return card;
+      });
+    }
+
+    // Children hold their own signature check, so this stays cheap.
+    for (const card of this._children) card.hass = this._hass;
+  }
+}
+
 // Guarded: the integration serves this itself now, but an installation that
 // still has the old /local/tensite-cell-grid.js resource would load it twice,
 // and a second customElements.define throws and takes the dashboard with it.
 if (!customElements.get("tensite-cell-grid")) {
   customElements.define("tensite-cell-grid", TensiteCellGrid);
+  customElements.define("tensite-cluster-grid", TensiteClusterGrid);
   window.customCards = window.customCards || [];
-  window.customCards.push({
-    type: "tensite-cell-grid",
-    name: "Tensite cell grid",
-    description: "Per-cell voltages for one battery, shaded by balance.",
-  });
+  window.customCards.push(
+    {
+      type: "tensite-cell-grid",
+      name: "Tensite cell grid",
+      description: "Per-cell voltages for one battery, shaded by balance.",
+    },
+    {
+      type: "tensite-cluster-grid",
+      name: "Tensite cluster grid",
+      description: "Every battery in a bank, on one shared colour scale.",
+    }
+  );
 }
